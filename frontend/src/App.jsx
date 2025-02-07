@@ -1,70 +1,74 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import "./App.css";
-import { Process, OpenFile } from "../wailsjs/go/main/Upscaler"; // ✅ Import OpenFile
+import { OpenFiles, ProcessVideos } from "../wailsjs/go/main/Upscaler";
 
 function App() {
-    const [inputFile, setInputFile] = useState(null);
-    const [status, setStatus] = useState("");
+    const [selectedFiles, setSelectedFiles] = useState([]);
+    const [status, setStatus] = useState({});
+    const [selectedModel, setSelectedModel] = useState("realesrgan-x4plus");
 
     const handleFileSelect = async () => {
         try {
-            const filePath = await OpenFile(); // ✅ Calls Go function
-            if (filePath) {
-                console.log("Selected file path:", filePath);
-                setInputFile(filePath);
+            const files = await OpenFiles();
+            if (files.length > 0) {
+                setSelectedFiles(files);
+                setStatus({});
             }
         } catch (error) {
-            console.error("Error selecting file:", error);
-            setStatus("Error selecting file.");
+            console.error("Error selecting files:", error);
         }
     };
 
     const handleUpscale = async () => {
-        if (!inputFile) {
-            setStatus("Please select a file first.");
+        if (selectedFiles.length === 0) {
+            alert("Please select at least one file.");
             return;
         }
 
-        // Extract filename without extension
-        const getFileNameWithoutExt = (path) => {
-            const parts = path.split("/");
-            const fileName = parts[parts.length - 1];
-            return fileName.replace(/\.[^/.]+$/, ""); // Remove extension
-        };
+        setStatus((prev) =>
+            Object.fromEntries(selectedFiles.map((file) => [file, "Processing..."]))
+        );
 
-        // Generate a unique output filename
-        const generateOutputFilename = (inputPath) => {
-            const baseName = getFileNameWithoutExt(inputPath);
-            const timestamp = new Date().toISOString().replace(/[-T:.Z]/g, ""); // YYYYMMDDHHMMSS format
-            const sequence = Math.floor(Math.random() * 1000); // Random sequence (000-999)
-            return `/home/riskibarqy/Video/${baseName}_${timestamp}_${sequence}.mp4`;
-        };
-
-        const outputFile = generateOutputFilename(inputFile);
         try {
-            console.log("Processing:", inputFile);
-            setStatus("Processing");
-            const result = await Process(inputFile, outputFile);
+            const result = await ProcessVideos(selectedFiles, selectedModel);
             setStatus(result);
         } catch (error) {
-            console.error("Error processing video:", error);
-            setStatus("Error processing video.");
+            console.error("Error processing videos:", error);
         }
     };
 
     return (
-        <div id="App">
-            <div className="flex flex-col items-center p-4">
-                <h1 className="text-2xl font-bold">AI Video Upscaler</h1>
-                <button onClick={handleFileSelect} className="p-2 bg-gray-500 text-white rounded">
-                    Select Video File
-                </button>
-                {inputFile && <p className="mt-2">Selected: {inputFile}</p>}
-                <button onClick={handleUpscale} className="p-2 bg-blue-500 text-white rounded mt-2">
-                    Upscale Video
-                </button>
-                <p className="mt-2">{status}</p>
-            </div>
+        <div className="flex flex-col items-center p-6">
+            <h1 className="text-2xl font-bold">AI Video Upscaler</h1>
+
+            <button onClick={handleFileSelect} className="p-2 bg-gray-500 text-white rounded">
+                Select Video Files
+            </button>
+
+            {selectedFiles.length > 0 && (
+                <div className="mt-4">
+                    <h2 className="text-lg font-semibold">Selected Files:</h2>
+                    <ul className="list-disc pl-4">
+                        {selectedFiles.map((file) => (
+                            <li key={file} className="text-sm">{file} - {status[file] || "Pending"}</li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
+            <label className="mt-4">
+                <span className="mr-2">Upscale Model:</span>
+                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-1">
+                    <option value="realesr-animevideov3">realesr-animevideov3</option>
+                    <option value="realesrgan-x4plus">realesrgan-x4plus</option>
+                    <option value="realesrgan-x4plus-anime">realesrgan-x4plus-anime</option>
+                    <option value="realesrnet-x4plus">realesrnet-x4plus</option>
+                </select>
+            </label>
+
+            <button onClick={handleUpscale} className="p-2 bg-blue-500 text-white rounded mt-4">
+                Upscale Videos
+            </button>
         </div>
     );
 }
