@@ -3,4 +3,4 @@
 
 export function OpenFiles():Promise<Array<string>>;
 
-export function ProcessVideos(arg1:Array<string>,arg2:string):Promise<{[key: string]: string}>;
+export function ProcessVideosFromUpload(arg1:Array<string>,arg2:Array<string>,arg3:string):Promise<{[key: string]: string}>;

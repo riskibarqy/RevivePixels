@@ -6,6 +6,6 @@ export function OpenFiles() {
   return window['go']['main']['Upscaler']['OpenFiles']();
 }
 
-export function ProcessVideos(arg1, arg2) {
-  return window['go']['main']['Upscaler']['ProcessVideos'](arg1, arg2);
+export function ProcessVideosFromUpload(arg1, arg2, arg3) {
+  return window['go']['main']['Upscaler']['ProcessVideosFromUpload'](arg1, arg2, arg3);
 }

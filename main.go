@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -26,6 +28,27 @@ type Upscaler struct {
 
 func (u *Upscaler) Startup(ctx context.Context) {
 	u.ctx = ctx
+
+	// Capture stderr and send logs to frontend
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// Capture logs in a goroutine
+	go func() {
+		var buf bytes.Buffer
+		for {
+			tmp := make([]byte, 1024)
+			n, _ := r.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+				logMsg := strings.TrimSpace(buf.String())
+				if logMsg != "" {
+					runtime.EventsEmit(u.ctx, "stderr_log", logMsg) // Send to frontend
+					buf.Reset()
+				}
+			}
+		}
+	}()
 }
 
 // ✅ Open multiple files
@@ -49,17 +72,33 @@ func (u *Upscaler) OpenFiles() ([]string, error) {
 	return files, nil
 }
 
-// ✅ Upscale videos using Real-ESRGAN
-func (u *Upscaler) ProcessVideos(inputFiles []string, model string) map[string]string {
+// ProcessVideosFromUpload handles uploaded files, saves them, and processes them
+func (u *Upscaler) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
 
-	for _, input := range inputFiles {
-		output := generateOutputFilename(input)
-		err := UpscaleVideoWithRealESRGAN(input, output, model)
+	for i, base64Data := range filesBase64 {
+		// Decode Base64 to []byte
+		fileBytes, err := base64.StdEncoding.DecodeString(base64Data)
 		if err != nil {
-			results[input] = "Failed: " + err.Error()
+			results[filenames[i]] = "Failed to decode: " + err.Error()
+			continue
+		}
+
+		// Save file to temp directory
+		tempFilePath := os.TempDir() + "/" + filenames[i]
+		err = os.WriteFile(tempFilePath, fileBytes, 0644)
+		if err != nil {
+			results[filenames[i]] = "Failed to save: " + err.Error()
+			continue
+		}
+
+		// Process video
+		output := generateOutputFilename(tempFilePath)
+		err = UpscaleVideoWithRealESRGAN(tempFilePath, output, model)
+		if err != nil {
+			results[filenames[i]] = "Failed: " + err.Error()
 		} else {
-			results[input] = "Success: " + output
+			results[filenames[i]] = "Success: " + output
 		}
 	}
 
@@ -67,7 +106,6 @@ func (u *Upscaler) ProcessVideos(inputFiles []string, model string) map[string]s
 }
 
 // ✅ Upscaling function using Real-ESRGAN
-// UpscaleVideoWithRealESRGAN upscales a video using Real-ESRGAN
 func UpscaleVideoWithRealESRGAN(input, output, model string) error {
 	log.Printf("Starting upscale: %s with model: %s", input, model)
 
