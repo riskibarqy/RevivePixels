@@ -10,25 +10,44 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+var wailsContext *context.Context
 
-type Upscaler struct {
+// App struct
+type App struct {
 	ctx context.Context
 }
 
-func (u *Upscaler) Startup(ctx context.Context) {
-	u.ctx = ctx
+// NewApp creates a new App application struct
+func NewApp() *App {
+	return &App{}
+}
 
+func (a *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceData) {
+	secondInstanceArgs := secondInstanceData.Args
+
+	println("user opened second instance", strings.Join(secondInstanceData.Args, ","))
+	println("user opened second from", secondInstanceData.WorkingDirectory)
+	wailsRuntime.WindowUnminimise(*wailsContext)
+	wailsRuntime.Show(*wailsContext)
+	go wailsRuntime.EventsEmit(*wailsContext, "launchArgs", secondInstanceArgs)
+}
+
+func (u *App) Startup(ctx context.Context) {
+	u.ctx = ctx
 	// Capture stderr and send logs to frontend
 	r, w, _ := os.Pipe()
 	os.Stderr = w
@@ -43,7 +62,7 @@ func (u *Upscaler) Startup(ctx context.Context) {
 				buf.Write(tmp[:n])
 				logMsg := strings.TrimSpace(buf.String())
 				if logMsg != "" {
-					runtime.EventsEmit(u.ctx, "stderr_log", logMsg) // Send to frontend
+					wailsRuntime.EventsEmit(u.ctx, "stderr_log", logMsg) // Send to frontend
 					buf.Reset()
 				}
 			}
@@ -51,29 +70,8 @@ func (u *Upscaler) Startup(ctx context.Context) {
 	}()
 }
 
-// ✅ Open multiple files
-func (u *Upscaler) OpenFiles() ([]string, error) {
-	if u.ctx == nil {
-		return nil, fmt.Errorf("context is nil")
-	}
-
-	files, err := runtime.OpenMultipleFilesDialog(u.ctx, runtime.OpenDialogOptions{
-		Title: "Select Video Files",
-		Filters: []runtime.FileFilter{
-			{
-				DisplayName: "Video Files",
-				Pattern:     "*.mp4;*.avi;*.mkv",
-			},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	return files, nil
-}
-
 // ProcessVideosFromUpload handles uploaded files, saves them, and processes them
-func (u *Upscaler) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
+func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
 
 	for i, base64Data := range filesBase64 {
@@ -107,39 +105,59 @@ func (u *Upscaler) ProcessVideosFromUpload(filesBase64 []string, filenames []str
 
 // ✅ Upscaling function using Real-ESRGAN
 func UpscaleVideoWithRealESRGAN(input, output, model string) error {
-	log.Printf("Starting upscale: %s with model: %s", input, model)
+	log.Printf("🚀 Starting upscale: %s with model: %s", input, model)
 
 	// Check if input file exists
 	if _, err := os.Stat(input); os.IsNotExist(err) {
-		return fmt.Errorf("file not found: %s", input)
+		return fmt.Errorf("File not found: %s", input)
 	}
 
 	// Create frames directory
 	frameDir := strings.TrimSuffix(input, filepath.Ext(input)) + "_frames"
 	if err := os.MkdirAll(frameDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create frame directory: %v", err)
+		return fmt.Errorf("Failed to create frame directory: %v", err)
 	}
 
-	// Extract frames using FFmpeg
+	// ⚡ Use FFmpeg with GPU acceleration (NVDEC)
 	framePattern := filepath.Join(frameDir, "frame_%04d.png")
-	extractCmd := exec.Command("ffmpeg", "-i", input, "-q:v", "2", framePattern) // Higher quality frames
+	extractCmd := exec.Command("ffmpeg",
+		"-hwaccel", "cuda", // ✅ Hardware Acceleration
+		"-i", input,
+		"-q:v", "2",
+		framePattern,
+	)
 	extractCmd.Stdout, extractCmd.Stderr = os.Stdout, os.Stderr
+	// Hide console window in Windows
+	if runtime.GOOS == "windows" {
+		extractCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	}
 	if err := extractCmd.Run(); err != nil {
-		return fmt.Errorf("error extracting frames: %v", err)
+		return fmt.Errorf("Error extracting frames: %v", err)
+	}
+
+	// Extract audio from original video
+	extractAudioCmd := exec.Command("ffmpeg", "-i", input, "-vn", "-acodec", "copy", "audio.aac")
+	extractAudioCmd.Stdout, extractAudioCmd.Stderr = os.Stdout, os.Stderr
+	// Hide console window in Windows
+	if runtime.GOOS == "windows" {
+		extractAudioCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	}
+	if err := extractAudioCmd.Run(); err != nil {
+		return fmt.Errorf("error extracting audio: %v", err)
 	}
 
 	// Get list of frames
 	frames, err := filepath.Glob(filepath.Join(frameDir, "*.png"))
 	if err != nil {
-		return fmt.Errorf("error finding frames: %v", err)
+		return fmt.Errorf("Error finding frames: %v", err)
 	}
 	if len(frames) == 0 {
-		return fmt.Errorf("no frames found in %s", frameDir)
+		return fmt.Errorf("No frames found in %s", frameDir)
 	}
 
 	// Process multiple frames in parallel
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4) // Max 4 concurrent processes
+	sem := make(chan struct{}, 6) // ✅ Max 6 concurrent processes
 
 	for _, frame := range frames {
 		wg.Add(1)
@@ -151,13 +169,17 @@ func UpscaleVideoWithRealESRGAN(input, output, model string) error {
 			cmd := exec.Command("realesrgan-ncnn-vulkan",
 				"-i", frame,
 				"-o", outputFrame,
-				"-s", "2", // Enable 2x scaling
-				"-t", "512", // Use a tile size that balances GPU load
-				"-g", "0", // Use first GPU
-				" --fp16", // Enable Tensor Core acceleration
+				"-s", "2", // ✅ 2x scaling
+				"-t", "1024", // ✅ Tile size to optimize VRAM usage
+				"-g", "0", // ✅ Use first GPU (RTX 3060)
+				" --fp16", // ✅ Enable Tensor Core acceleration
 				"-n", model,
 			)
 			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			// Hide console window in Windows
+			if runtime.GOOS == "windows" {
+				cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+			}
 			cmd.Run()
 
 			<-sem // Release slot
@@ -165,22 +187,29 @@ func UpscaleVideoWithRealESRGAN(input, output, model string) error {
 	}
 	wg.Wait()
 
-	// Reassemble video from upscaled frames
+	// ⚡ Reassemble video with NVENC acceleration
 	outputPattern := filepath.Join(frameDir, "upscaled_frame_%04d.png")
+	// Reassemble video with upscaled frames and original audio
 	assembleCmd := exec.Command("ffmpeg",
-		"-r", "30", // Ensure correct frame rate
+		"-r", "30",
 		"-i", outputPattern,
+		"-i", "audio.aac",
 		"-c:v", "libx264",
 		"-crf", "18",
-		"-pix_fmt", "yuv420p", // Ensures broad compatibility
+		"-pix_fmt", "yuv420p",
+		"-c:a", "copy",
 		output,
 	)
 	assembleCmd.Stdout, assembleCmd.Stderr = os.Stdout, os.Stderr
+	// Hide console window in Windows
+	if runtime.GOOS == "windows" {
+		assembleCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	}
 	if err := assembleCmd.Run(); err != nil {
 		return fmt.Errorf("error assembling video: %v", err)
 	}
 
-	log.Println("Upscaling completed successfully!")
+	log.Println("✅ Upscaling completed successfully!")
 	return nil
 }
 
@@ -191,17 +220,51 @@ func generateOutputFilename(input string) string {
 }
 
 func main() {
-	app := &Upscaler{}
+	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:  "AI Video Upscaler",
-		Width:  1024,
-		Height: 768,
+		Title: "AI Video Upscaler",
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.Startup,
+		Width:            800,
+		Height:           600,
+		DisableResize:    false,
+		Fullscreen:       false,
+		WindowStartState: options.Normal,
+		MinWidth:         400,
+		MinHeight:        400,
+		// MaxWidth:  1280,
+		// MaxHeight: 1024,
+		// BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		OnStartup: app.Startup,
+		// OnDomReady:         app.domready,
+		// OnShutdown:         app.shutdown,
+		// OnBeforeClose:      app.beforeClose,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "e3984e08-28dc-4e3d-b70a-45e961589cdc",
+			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
+		},
+
+		Windows: &windows.Options{
+			WebviewIsTransparent:              false,
+			WindowIsTranslucent:               false,
+			BackdropType:                      windows.Mica,
+			DisablePinchZoom:                  false,
+			DisableWindowIcon:                 false,
+			DisableFramelessWindowDecorations: false,
+			WebviewUserDataPath:               "",
+			WebviewBrowserPath:                "",
+			Theme:                             windows.SystemDefault,
+			CustomTheme: &windows.ThemeSettings{
+				DarkModeTitleBar:   windows.RGB(20, 20, 20),
+				DarkModeTitleText:  windows.RGB(200, 200, 200),
+				DarkModeBorder:     windows.RGB(20, 0, 20),
+				LightModeTitleBar:  windows.RGB(200, 200, 200),
+				LightModeTitleText: windows.RGB(20, 20, 20),
+				LightModeBorder:    windows.RGB(200, 200, 200),
+			},
+		},
 		Bind: []interface{}{
 			app,
 		},

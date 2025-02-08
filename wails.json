@@ -11,8 +11,8 @@
     "email": "riskibarqy@gmail.com"
   },
   "bindings": {
-    "main.Upscaler": {
-      "methods": ["Process", "OpenFile"]
+    "main.App": {
+      "methods": ["ProcessVideosFromUpload"]
     }
   }
 }
