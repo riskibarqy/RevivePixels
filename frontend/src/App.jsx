@@ -58,7 +58,6 @@ function App() {
             Object.fromEntries(selectedFiles.map((file) => [file.name, "Processing..."]))
         );
 
-
         try {
             const fileDataPromises = selectedFiles.map((file) => {
                 return new Promise((resolve, reject) => {
@@ -135,20 +134,20 @@ function App() {
                     >
                         {processing ? `Processing... (${elapsedTime}s)` : "Upscale Videos"}
                     </button>
-                    {processing && (
+                    {/* TODO : ADD CANCEL BUTTON */}
+                    {/* {processing && (
                         <button
                             onClick={handleCancel}
                             className="bg-red-600 hover:bg-red-500 text-white font-semibold p-3 rounded-lg transition"
                         >
                             Cancel
                         </button>
-                    )}
+                    )} */}
                 </div>
                 <div ref={logContainerRef} className="mt-6 bg-black p-4 rounded-lg h-40 overflow-auto text-green-400">
                     <h2 className="text-lg font-semibold text-white">Terminal Logs:</h2>
                     <pre className="text-sm whitespace-pre-wrap">{logs.join("\n")}</pre>
                 </div>
-                {processing ? `Processing... (${elapsedTime}s)`: `${elapsedTime}s`}
             </div>
         </div>
     );
