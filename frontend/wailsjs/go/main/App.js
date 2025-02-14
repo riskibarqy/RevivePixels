@@ -5,7 +5,3 @@
 export function ProcessVideosFromUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['ProcessVideosFromUpload'](arg1, arg2, arg3);
 }
-
-export function UpscaleVideoWithRealESRGAN(arg1) {
-  return window['go']['main']['App']['UpscaleVideoWithRealESRGAN'](arg1);
-}

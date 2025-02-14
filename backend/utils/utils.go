@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"fmt"
 	"go-upscaler/backend/datatransfers"
 	"os"
 	"os/exec"
@@ -17,29 +16,16 @@ func HideWindowsCMD(cmd *exec.Cmd) {
 	}
 }
 
-// CleanupTempFiles removes temporary frames and audio file
+// CleanupTempFiles removes temporary frames to save disk space
 func CleanupTempFiles(frameDir string, params *datatransfers.VideoUpscalerRequest) error {
-	fmt.Println("Cleaning up temporary files...")
-
-	// remove temp directory
-	err := os.RemoveAll(frameDir)
+	files, err := filepath.Glob(filepath.Join(frameDir, "*.png"))
 	if err != nil {
 		return err
 	}
-
-	// remove audio file
-	err = os.Remove(params.AudioFileName)
-	if err != nil {
-		return err
+	for _, file := range files {
+		_ = os.Remove(file)
 	}
 
-	// remove audio file
-	err = os.Remove(params.TempFilePath)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Cleanup completed.")
 	return nil
 }
 

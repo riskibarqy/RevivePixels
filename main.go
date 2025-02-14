@@ -9,7 +9,6 @@ import (
 	"go-upscaler/backend"
 	"go-upscaler/backend/datatransfers"
 	"go-upscaler/backend/utils"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,32 +21,46 @@ import (
 
 //go:embed all:frontend/dist
 var assets embed.FS
-var wailsContext *context.Context
 
 // App struct
 type App struct {
 	ctx           context.Context
-	videoUpscaler backend.VideoUpscaler
+	videoUpscaler backend.VideoUpscalerUsecase
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
+	videoUpscaler := backend.NewVideoUpscaler()
 	return &App{
-		videoUpscaler: backend.VideoUpscaler{},
+		videoUpscaler: videoUpscaler,
 	}
 }
 
-func (a *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceData) {
+func (u *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceData) {
 	secondInstanceArgs := secondInstanceData.Args
 
 	println("user opened second instance", strings.Join(secondInstanceData.Args, ","))
 	println("user opened second from", secondInstanceData.WorkingDirectory)
-	wailsRuntime.WindowUnminimise(*wailsContext)
-	wailsRuntime.Show(*wailsContext)
-	go wailsRuntime.EventsEmit(*wailsContext, "launchArgs", secondInstanceArgs)
+	wailsRuntime.WindowUnminimise(u.ctx)
+	wailsRuntime.Show(u.ctx)
+	go wailsRuntime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
 }
 
-func (u *App) Startup(ctx context.Context) {
+func (b *App) beforeClose(ctx context.Context) (prevent bool) {
+	dialog, err := wailsRuntime.MessageDialog(ctx, wailsRuntime.MessageDialogOptions{
+		Type:    wailsRuntime.QuestionDialog,
+		Title:   "Quit?",
+		Message: "Are you sure you want to quit?",
+	})
+
+	if err != nil {
+		return false
+	}
+
+	return dialog != "Yes"
+}
+
+func (u *App) startup(ctx context.Context) {
 	u.ctx = ctx
 	// Capture stderr and send logs to frontend
 	r, w, _ := os.Pipe()
@@ -63,7 +76,7 @@ func (u *App) Startup(ctx context.Context) {
 				buf.Write(tmp[:n])
 				logMsg := strings.TrimSpace(buf.String())
 				if logMsg != "" {
-					wailsRuntime.EventsEmit(u.ctx, "stderr_log", logMsg) // Send to frontend
+					wailsRuntime.EventsEmit(ctx, "stderr_log", logMsg) // Send to frontend
 					buf.Reset()
 				}
 			}
@@ -74,6 +87,7 @@ func (u *App) Startup(ctx context.Context) {
 // ProcessVideosFromUpload handles uploaded files, saves them, and processes them
 func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
+
 	outputFolder, _ := utils.GetOutputVideoFolder()
 	for i, base64Data := range filesBase64 {
 		// Decode Base64 to []byte
@@ -83,22 +97,39 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 			continue
 		}
 
+		tempDir, err := os.MkdirTemp(os.TempDir(), "go-upscaler")
+		if err != nil {
+			wailsRuntime.LogError(u.ctx, fmt.Sprintf("failed create temp dir : %v", err))
+			continue
+		}
+
 		// Save file to temp directory
-		tempFilePath := os.TempDir() + "/" + filenames[i]
+		tempFilePath := fmt.Sprintf("%s\\%s", tempDir, filenames[i])
 		err = os.WriteFile(tempFilePath, fileBytes, 0644)
 		if err != nil {
 			results[filenames[i]] = "Failed to save: " + err.Error()
 			continue
 		}
 
+		// ** Get File Details **
+		fileInfo, err := os.Stat(tempFilePath)
+		if err != nil {
+			results[filenames[i]] = "Failed to get file info: " + err.Error()
+			continue
+		}
+
 		savePath := outputFolder + "\\" + fmt.Sprintf("%d_upscaled_", utils.NowUnix()) + filenames[i]
 
 		// Process video
-		err = u.UpscaleVideoWithRealESRGAN(&datatransfers.VideoUpscalerRequest{
-			FullFileName: filenames[i],
-			TempFilePath: tempFilePath,
-			Model:        model,
-			SavePath:     savePath,
+		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(u.ctx, &datatransfers.VideoUpscalerRequest{
+			InputPlainFileName: strings.TrimSuffix(fileInfo.Name(), filepath.Ext(tempFilePath)),
+			InputFullFileName:  fileInfo.Name(),
+			InputFileExt:       filepath.Ext(tempFilePath),
+			InputFileSize:      fileInfo.Size(),
+			TempFilePath:       tempFilePath,
+			TempDir:            tempDir,
+			Model:              model,
+			SavePath:           savePath,
 		})
 		if err != nil {
 			results[filenames[i]] = "Failed: " + err.Error()
@@ -110,76 +141,6 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 	return results
 }
 
-// ✅ Upscaling function using Real-ESRGAN
-func (u *App) UpscaleVideoWithRealESRGAN(params *datatransfers.VideoUpscalerRequest) error {
-	log.Printf("🚀 Starting upscale: %s with model: %s", params.FullFileName, params.Model)
-
-	// Check if input file exists
-	if _, err := os.Stat(params.TempFilePath); os.IsNotExist(err) {
-		return fmt.Errorf("file not found: %s", params.TempFilePath)
-	}
-
-	// Create frames directory
-	frameDir := strings.TrimSuffix(params.TempFilePath, filepath.Ext(params.TempFilePath)) + "_frames"
-	if err := os.MkdirAll(frameDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create frame directory: %v", err)
-	}
-
-	// Use FFmpeg with GPU acceleration (NVDEC) to extract video per frame
-	if err := u.videoUpscaler.ExtractVideoFrames(frameDir, params.TempFilePath); err != nil {
-		return fmt.Errorf("error extract video frames : %v", err)
-	}
-
-	// get details video, total frames & fps
-	_, videoFPS, err := u.videoUpscaler.GetVideoFrames(params.TempFilePath)
-	if err != nil {
-		return fmt.Errorf("error get video detail : %v", err)
-	}
-
-	if params.VideoFPS == 0 {
-		params.VideoFPS = videoFPS
-	}
-
-	splitFullFileName := strings.Split(params.FullFileName, ".")
-	params.PlainFileName = splitFullFileName[0]
-	params.FileExtension = splitFullFileName[1]
-	params.AudioFileName = fmt.Sprintf("%s.aac", params.PlainFileName)
-
-	// Extract audio from original video
-	if err := u.videoUpscaler.ExtractAudio(params.TempFilePath, params.AudioFileName); err != nil {
-		return fmt.Errorf("error extract audio : %v", err)
-	}
-
-	// Get list of frames
-	frames, err := filepath.Glob(filepath.Join(frameDir, "*.png"))
-	if err != nil {
-		return fmt.Errorf("error finding frames: %v", err)
-	}
-	if len(frames) == 0 {
-		return fmt.Errorf("no frames found in %s", frameDir)
-	}
-
-	// Process to upscale multiple frames in parallel
-	if err := u.videoUpscaler.UpscaleFrames(frames, frameDir, params); err != nil {
-		return fmt.Errorf("error upscale video : %v", err)
-	}
-
-	// Process to upscale multiple frames in parallel
-	if err := u.videoUpscaler.ReassembleVideo(frameDir, params); err != nil {
-		return fmt.Errorf("error reassemble video : %v", err)
-	}
-
-	log.Println("✅ Upscaling completed successfully!")
-
-	defer func() {
-		if err = utils.CleanupTempFiles(frameDir, params); err != nil {
-			log.Println("failed to delete temp", err.Error())
-		}
-	}()
-
-	return nil
-}
-
 func main() {
 	app := NewApp()
 
@@ -188,14 +149,15 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		Width:            600,
-		Height:           800,
-		DisableResize:    false,
-		Fullscreen:       false,
-		WindowStartState: options.Normal,
-		MinWidth:         400,
-		MinHeight:        400,
-		OnStartup:        app.Startup,
+		EnableDefaultContextMenu: true,
+		Width:                    600,
+		Height:                   800,
+		DisableResize:            false,
+		Fullscreen:               false,
+		MinWidth:                 400,
+		MinHeight:                400,
+		OnBeforeClose:            app.beforeClose,
+		OnStartup:                app.startup,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               "e3984e08-28dc-4e3d-b70a-45e961589cdc",
 			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,

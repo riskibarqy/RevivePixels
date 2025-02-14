@@ -124,6 +124,11 @@ function App() {
                         <option value="realesrnet-x4plus">realesrnet-x4plus</option>
                         <option value="realesr-animevideov3">realesr-animevideov3</option>
                         <option value="realesrgan-x4plus-anime">realesrgan-x4plus-anime</option>
+                        <option value="4xNomos8kSC_fp16">4xNomos8kSC_fp16</option>
+                        <option value="4xNomos8kSC_fp32">4xNomos8kSC_fp32</option>
+                        <option value="DF2K">DF2K</option>
+                        <option value="NoiseToner">NoiseToner</option>
+                        <option value="RealeSR-general-v3">RealeSR-general-v3</option>
                     </select>
                 </div>
                 <div className="flex gap-3 mt-6">

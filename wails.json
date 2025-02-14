@@ -14,14 +14,5 @@
     "main.App": {
       "methods": ["ProcessVideosFromUpload"]
     }
-  },
-  "bundled": [
-    "realesrgan-ncnn-vulkan.exe",
-    "ffmpeg.exe",
-    "models/realesrgan-x4plus.bin",
-    "models/realesrgan-x4plus-anime.bin",
-    "models/realesr-animevideov3-x2.bin",
-    "models/realesr-animevideov3-x3.bin",
-    "models/realesr-animevideov3-x4.bin"
-  ]
+  }
 }
