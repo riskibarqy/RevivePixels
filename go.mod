@@ -1,14 +1,10 @@
-module go-upscaler
+module github.com/riskibarqy/go-upscaler
 
-go 1.22.0
-
-toolchain go1.23.6
-
-// replace github.com/wailsapp/wails/v2 v2.9.2 => /home/riskibarqy/go/pkg/mod
+go 1.23.6
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/wailsapp/wails/v2 v2.9.2
+	github.com/wailsapp/wails/v2 v2.10.0
 )
 
 require (

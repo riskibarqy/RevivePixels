@@ -6,11 +6,12 @@ import (
 	"embed"
 	"encoding/base64"
 	"fmt"
-	"go-upscaler/backend"
-	"go-upscaler/backend/datatransfers"
-	"go-upscaler/backend/utils"
 	"log"
 	"path/filepath"
+
+	"github.com/riskibarqy/go-upscaler/backend"
+	"github.com/riskibarqy/go-upscaler/backend/datatransfers"
+	"github.com/riskibarqy/go-upscaler/backend/utils"
 
 	"os"
 	"strings"

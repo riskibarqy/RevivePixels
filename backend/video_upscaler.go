@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go-upscaler/backend/datatransfers"
-	"go-upscaler/backend/models"
-	"go-upscaler/backend/utils"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/riskibarqy/go-upscaler/backend/datatransfers"
+	"github.com/riskibarqy/go-upscaler/backend/models"
+	"github.com/riskibarqy/go-upscaler/backend/utils"
 
 	"github.com/google/uuid"
 )
