@@ -27,6 +27,7 @@ import (
 var assets embed.FS
 
 var logger *utils.CustomLogger
+var cancelFunc context.CancelFunc
 
 // App struct
 type App struct {
@@ -95,6 +96,10 @@ func (u *App) startup(ctx context.Context) {
 func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
 
+	// Create a cancellable context
+	ctx, cancel := context.WithCancel(u.ctx)
+	cancelFunc = cancel // Store cancel function globally
+
 	outputFolder, _ := utils.GetOutputVideoFolder()
 	for i, base64Data := range filesBase64 {
 		// Decode Base64 to []byte
@@ -106,7 +111,7 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 
 		tempDir, err := os.MkdirTemp(os.TempDir(), "go-upscaler")
 		if err != nil {
-			runtime.LogError(u.ctx, fmt.Sprintf("failed create temp dir : %v", err))
+			runtime.LogError(ctx, fmt.Sprintf("failed create temp dir : %v", err))
 			continue
 		}
 
@@ -128,7 +133,7 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 		savePath := outputFolder + "\\" + fmt.Sprintf("%d_upscaled_", utils.NowUnix()) + filenames[i]
 
 		// Process video
-		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(u.ctx, &datatransfers.VideoUpscalerRequest{
+		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(ctx, &datatransfers.VideoUpscalerRequest{
 			InputPlainFileName: strings.TrimSuffix(fileInfo.Name(), filepath.Ext(tempFilePath)),
 			InputFullFileName:  fileInfo.Name(),
 			InputFileExt:       filepath.Ext(tempFilePath),
@@ -150,6 +155,14 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 	}
 
 	return results
+}
+
+func (u *App) CancelProcessing() {
+	if cancelFunc != nil {
+		cancelFunc() // Cancel all running tasks
+		fmt.Println("Processing canceled by user.")
+		logger.Warning("Processing canceled by user")
+	}
 }
 
 func main() {

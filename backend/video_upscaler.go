@@ -49,8 +49,7 @@ func runCommand(cmd *exec.Cmd) error {
 // ExtractVideoFrames extracts a batch of frames from the video to reduce memory usage
 func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount int) error {
 	outputPattern := filepath.Join(frameDir, "frame_%04d.png")
-
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-i", videoPath,
 		"-vf", fmt.Sprintf("select=between(n\\,%d\\,%d)", startFrame, startFrame+frameCount-1),
 		"-vsync", "vfr",
@@ -71,7 +70,7 @@ func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir,
 
 // GetVideoFrames returns the number of frames and FPS of a video.
 func (u *videoUpscalerUsecase) GetVideoFrames(ctx context.Context, inputPath string) (int, int, error) {
-	cmd := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0",
 		"-show_entries", "stream=nb_frames,r_frame_rate", "-of", "json", inputPath)
 	utils.HideWindowsCMD(cmd)
 	output, err := cmd.Output()
@@ -99,7 +98,7 @@ func (u *videoUpscalerUsecase) GetVideoFrames(ctx context.Context, inputPath str
 
 // ExtractAudio extracts the audio track from a video if available.
 func (u *videoUpscalerUsecase) ExtractAudio(ctx context.Context, params *datatransfers.VideoUpscalerRequest) error {
-	hasAudio, err := u.hasAudioStream(params.TempFilePath)
+	hasAudio, err := u.hasAudioStream(ctx, params.TempFilePath)
 	if err != nil {
 		return err
 	}
@@ -110,13 +109,13 @@ func (u *videoUpscalerUsecase) ExtractAudio(ctx context.Context, params *datatra
 		return nil
 	}
 
-	cmd := exec.Command("ffmpeg", "-i", params.TempFilePath, "-vn", "-acodec", "copy", params.TempDir+"/"+params.AudioFileName)
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", params.TempFilePath, "-vn", "-acodec", "copy", params.TempDir+"/"+params.AudioFileName)
 	return runCommand(cmd)
 }
 
 // hasAudioStream checks if a video contains an audio stream
-func (u *videoUpscalerUsecase) hasAudioStream(videoPath string) (bool, error) {
-	cmd := exec.Command("ffprobe", "-i", videoPath, "-show_streams", "-select_streams", "a", "-loglevel", "error")
+func (u *videoUpscalerUsecase) hasAudioStream(ctx context.Context, videoPath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "ffprobe", "-i", videoPath, "-show_streams", "-select_streams", "a", "-loglevel", "error")
 	utils.HideWindowsCMD(cmd)
 	output, err := cmd.Output()
 	if err != nil {
@@ -139,7 +138,7 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 			defer func() { <-sem }() // Release slot
 
 			outputFrame := filepath.Join(frameDir, "upscaled_"+filepath.Base(frame))
-			cmd := exec.Command("realesrgan-ncnn-vulkan",
+			cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan",
 				"-i", frame,
 				"-o", outputFrame,
 				"-s", "2",
@@ -162,7 +161,9 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 	// Check for any errors
 	var allErrors []string
 	for err := range errChan {
-		allErrors = append(allErrors, err.Error())
+		if !utils.IgnoreError(err.Error()) {
+			allErrors = append(allErrors, err.Error())
+		}
 	}
 
 	if len(allErrors) > 0 {
@@ -182,7 +183,7 @@ func (u *videoUpscalerUsecase) ReassembleVideo(ctx context.Context, frameDir, ou
 		return fmt.Errorf("no upscaled frames found in %s", frameDir)
 	}
 
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-framerate", fmt.Sprintf("%d", params.VideoFPS),
 		"-i", framePattern,
 		"-c:v", "libx264",
@@ -228,7 +229,7 @@ func (u *videoUpscalerUsecase) MergeVideos(ctx context.Context, videoPaths []str
 	cmdArgs = append(cmdArgs, "-y", params.SavePath) // "-y" forces overwrite
 
 	// Execute command
-	cmd := exec.Command("ffmpeg", cmdArgs...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", cmdArgs...)
 	return runCommand(cmd)
 }
 

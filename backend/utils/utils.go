@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -34,4 +36,15 @@ func GetOutputVideoFolder() (string, error) {
 
 func NowUnix() int {
 	return int(time.Now().Unix())
+}
+
+func IgnoreError(errString string) bool {
+	if strings.Contains(errString, "exit status 1") {
+		return true
+	}
+
+	if strings.Contains(errString, context.Canceled.Error()) {
+		return true
+	}
+	return false
 }
