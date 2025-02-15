@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { ProcessVideosFromUpload } from "../wailsjs/go/main/App";
-import { EventsOn } from "../wailsjs/runtime";
+import { EventsOn,EventsOff } from "../wailsjs/runtime";
 
 function App() {
     const [selectedFiles, setSelectedFiles] = useState([]);
@@ -15,10 +15,17 @@ function App() {
     let timer = useRef(null);
 
     useEffect(() => {
-        EventsOn("stderr_log", (log) => {
+        const handler = (log) => {
             setLogs((prevLogs) => [...prevLogs, log]);
-        });
+        };
+    
+        EventsOn("stderr_log", handler);
+    
+        return () => {
+            EventsOff("stderr_log", handler); // Clean up listener
+        };
     }, []);
+    
 
     useEffect(() => {
         if (logContainerRef.current) {
@@ -124,11 +131,6 @@ function App() {
                         <option value="realesrnet-x4plus">realesrnet-x4plus</option>
                         <option value="realesr-animevideov3">realesr-animevideov3</option>
                         <option value="realesrgan-x4plus-anime">realesrgan-x4plus-anime</option>
-                        <option value="4xNomos8kSC_fp16">4xNomos8kSC_fp16</option>
-                        <option value="4xNomos8kSC_fp32">4xNomos8kSC_fp32</option>
-                        <option value="DF2K">DF2K</option>
-                        <option value="NoiseToner">NoiseToner</option>
-                        <option value="RealeSR-general-v3">RealeSR-general-v3</option>
                     </select>
                 </div>
                 <div className="flex gap-3 mt-6">

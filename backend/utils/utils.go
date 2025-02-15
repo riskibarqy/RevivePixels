@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"go-upscaler/backend/datatransfers"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,19 +13,6 @@ func HideWindowsCMD(cmd *exec.Cmd) {
 	if runtime.GOOS == "windows" {
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	}
-}
-
-// CleanupTempFiles removes temporary frames to save disk space
-func CleanupTempFiles(frameDir string, params *datatransfers.VideoUpscalerRequest) error {
-	files, err := filepath.Glob(filepath.Join(frameDir, "*.png"))
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		_ = os.Remove(file)
-	}
-
-	return nil
 }
 
 func GetOutputVideoFolder() (string, error) {

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"embed"
 	"encoding/base64"
@@ -9,18 +9,23 @@ import (
 	"go-upscaler/backend"
 	"go-upscaler/backend/datatransfers"
 	"go-upscaler/backend/utils"
-	"os"
+	"log"
 	"path/filepath"
+
+	"os"
 	"strings"
 
 	"github.com/wailsapp/wails/v2"
+
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+var logger *utils.CustomLogger
 
 // App struct
 type App struct {
@@ -30,7 +35,7 @@ type App struct {
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	videoUpscaler := backend.NewVideoUpscaler()
+	videoUpscaler := backend.NewVideoUpscaler(logger)
 	return &App{
 		videoUpscaler: videoUpscaler,
 	}
@@ -41,14 +46,14 @@ func (u *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceDa
 
 	println("user opened second instance", strings.Join(secondInstanceData.Args, ","))
 	println("user opened second from", secondInstanceData.WorkingDirectory)
-	wailsRuntime.WindowUnminimise(u.ctx)
-	wailsRuntime.Show(u.ctx)
-	go wailsRuntime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
+	runtime.WindowUnminimise(u.ctx)
+	runtime.Show(u.ctx)
+	go runtime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
 }
 
 func (b *App) beforeClose(ctx context.Context) (prevent bool) {
-	dialog, err := wailsRuntime.MessageDialog(ctx, wailsRuntime.MessageDialogOptions{
-		Type:    wailsRuntime.QuestionDialog,
+	dialog, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:    runtime.QuestionDialog,
 		Title:   "Quit?",
 		Message: "Are you sure you want to quit?",
 	})
@@ -62,25 +67,26 @@ func (b *App) beforeClose(ctx context.Context) (prevent bool) {
 
 func (u *App) startup(ctx context.Context) {
 	u.ctx = ctx
-	// Capture stderr and send logs to frontend
+
+	// Create a pipe to capture stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
 	// Capture logs in a goroutine
 	go func() {
-		var buf bytes.Buffer
-		for {
-			tmp := make([]byte, 1024)
-			n, _ := r.Read(tmp)
-			if n > 0 {
-				buf.Write(tmp[:n])
-				logMsg := strings.TrimSpace(buf.String())
-				if logMsg != "" {
-					wailsRuntime.EventsEmit(ctx, "stderr_log", logMsg) // Send to frontend
-					buf.Reset()
-				}
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			logMsg := strings.TrimSpace(scanner.Text())
+			if logMsg != "" {
+
+				// Send to frontend
+				runtime.EventsEmit(ctx, "stderr_log", logMsg)
 			}
 		}
+	}()
+
+	go func() {
+		<-ctx.Done()
 	}()
 }
 
@@ -99,7 +105,7 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 
 		tempDir, err := os.MkdirTemp(os.TempDir(), "go-upscaler")
 		if err != nil {
-			wailsRuntime.LogError(u.ctx, fmt.Sprintf("failed create temp dir : %v", err))
+			runtime.LogError(u.ctx, fmt.Sprintf("failed create temp dir : %v", err))
 			continue
 		}
 
@@ -138,13 +144,27 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 		}
 	}
 
+	for _, v := range results {
+		logger.Debug(v)
+	}
+
 	return results
 }
 
 func main() {
+	var err error
+
+	logger, err = utils.NewCustomLogger("app.log")
+	if err != nil {
+		log.Fatal("Failed to initialize logger:", err)
+	}
+	defer logger.Close()
+
+	logger.Info("Application starting...")
+
 	app := NewApp()
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title: "AI Video Upscaler",
 		AssetServer: &assetserver.Options{
 			Assets: assets,
@@ -168,6 +188,7 @@ func main() {
 	})
 
 	if err != nil {
+		logger.Fatal(err.Error())
 		println("Error:", err.Error())
 	}
 }
