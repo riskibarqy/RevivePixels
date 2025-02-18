@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { ProcessVideosFromUpload, CancelProcessing } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff } from "../wailsjs/runtime";
-import { motion } from "framer-motion";
+import { color, motion } from "framer-motion";
 import { Loader2, Upload, XCircle } from "lucide-react";
-import  Button  from "./components/ui/button";
+import Button from "./components/ui/button";
 
 function App() {
     const [selectedFiles, setSelectedFiles] = useState([]);
@@ -15,6 +15,8 @@ function App() {
     const [elapsedTime, setElapsedTime] = useState(0);
     const logContainerRef = useRef(null);
     const startTimeRef = useRef(null);
+    const [thumbnails, setThumbnails] = useState({}); // Store thumbnails per file
+
     let timer = useRef(null);
 
     useEffect(() => {
@@ -43,7 +45,48 @@ function App() {
     const onDrop = useCallback((acceptedFiles) => {
         setSelectedFiles(acceptedFiles);
         setStatus({});
+
+        acceptedFiles.forEach((file) => {
+            generateThumbnail(file);
+        });
     }, []);
+
+    const generateThumbnail = (file) => {
+        const video = document.createElement("video");
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        video.src = URL.createObjectURL(file);
+        video.crossOrigin = "anonymous";
+        video.currentTime = 1; // Capture a frame at 1s
+        video.muted = true
+
+        video.onloadeddata = () => {
+            video.play();
+        };
+
+        video.onseeked = () => {
+            canvas.width = video.videoWidth / 4; // Resize for preview
+            canvas.height = video.videoHeight / 4;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert canvas to data URL (thumbnail)
+            const thumbnailUrl = canvas.toDataURL("image/webp");
+            setThumbnails((prev) => ({ ...prev, [file.name]: thumbnailUrl }));
+
+            // Cleanup
+            video.pause();
+            // URL.revokeObjectURL(video.src);
+        };
+
+        video.onerror = (e) => {
+            // console.error("Error loading video:", e);
+        };
+
+        // Seek to trigger onseeked event
+        video.currentTime = 1;
+    };
+
 
     const { getRootProps, getInputProps } = useDropzone({
         accept: { "video/*": [] },
@@ -77,67 +120,98 @@ function App() {
         setProcessing(false);
     };
 
+    const discardFile = (file) => {
+        setSelectedFiles(selectedFiles.filter(f => f.name !== file.name)); // Remove the discarded file from the list
+    };
+
     const handleCancel = () => {
         CancelProcessing();
         setProcessing(false);
-        setStatus({});
+        setStatus("pending");
         setElapsedTime(0);
         setLogs((prevLogs) => [...prevLogs, "Process canceled."]);
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-6">
-            <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-                className="w-full max-w-3xl p-6 bg-gray-800 rounded-2xl shadow-lg">
-                <h1 className="text-4xl font-bold text-center mb-6">AI Video Upscaler</h1>
+
+        <div className="grid grid-cols-4 md:grid-cols-5 grid-rows-5 h-screen w-screen overflow-hidden">
+            {/* Drop Files */}
+            <div className="col-span-4 flex flex-col items-center justify-center p-3">
                 <div {...getRootProps()}
-                    className="border-2 border-dashed border-gray-500 rounded-lg p-6 text-center cursor-pointer hover:bg-gray-700 transition">
+                    className="p-6 text-center cursor-pointer hover:bg-opacity-50 border-2 border-dashed border-gray-500 rounded-lg w-full h-48 flex items-center justify-center">
                     <input {...getInputProps()} />
                     <p className="text-lg flex items-center justify-center gap-2">
-                        <Upload size={20} /> Drag & drop videos here, or click to select
+                        📂 Drag & drop videos here, or click to select
                     </p>
                 </div>
-                {selectedFiles.length > 0 && (
-                    <div className="mt-4 bg-gray-700 p-4 rounded-lg">
-                        <h2 className="text-lg font-semibold">Selected Files:</h2>
-                        <ul className="list-disc pl-4">
-                            {selectedFiles.map((file) => (
-                                <li key={file.name} className="text-sm">
-                                    {file.name} - {status[file.name] || "Pending"}
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+            </div>
+
+            {/* Terminal Logs */}
+            <div ref={logContainerRef} className="col-span-4 row-start-5 min-h-full bg-black rounded-md overflow-auto text-green-400 mb-1 ml-1 mr-1 p-3">
+                <h2 className="text-lg font-semibold text-white">Terminal Logs:</h2>
+                <pre className="text-sm whitespace-pre-wrap">{logs.join("\n")}</pre>
+            </div>
+
+            {/* Upscale Model Selector */}
+            <div className="row-span-2 col-start-5 row-start-1 flex flex-col p-3">
+                <label className="text-lg">Upscale Model:</label>
+                <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="mt-2 bg-gray-700 text-white p-2 rounded-lg"
+                >
+                    <option value="realesrgan-x4plus">realesrgan-x4plus</option>
+                    <option value="realesrnet-x4plus">realesrnet-x4plus</option>
+                    <option value="realesr-animevideov3">realesr-animevideov3</option>
+                    <option value="realesrgan-x4plus-anime">realesrgan-x4plus-anime</option>
+                </select>
+            </div>
+
+            {/* File List */}
+            <div className="col-span-4 row-span-3 col-start-1 row-start-2 overflow-y-auto h-full p-3 bg-gray-800 rounded-md">
+                {selectedFiles.length > 0 ? (
+                    <ul className="list-none text-white">
+                        {selectedFiles.map((file) => (
+                            <li key={file.name} className="flex items-center gap-3 p-2 bg-gray-700 rounded-md mb-2">
+                                {/* Thumbnail */}
+                                {thumbnails[file.name] && (
+                                    <img src={thumbnails[file.name]} alt="Thumbnail" className="w-16 h-16 object-cover rounded-md" />
+                                )}
+
+                                {/* File Info */}
+                                <div className="flex-1 overflow-hidden">
+                                    <span className="text-white block truncate">{file.name}</span>
+                                    <span className="text-sm text-gray-400">{(file.size / (1024 * 1024)).toFixed(2) + " MB " +status}</span>
+                                </div>
+
+                                {/* Remove Button */}
+                                <button
+                                    className="text-red-600 hover:text-red-800"
+                                    onClick={() => discardFile(file)}
+                                >
+                                    ❌
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="text-gray-400 text-center">No files selected.</p>
                 )}
-                <div className="mt-6">
-                    <label className="block text-lg">Upscale Model:</label>
-                    <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="mt-2 bg-gray-700 text-white p-2 rounded-lg w-full"
-                    >
-                        <option value="realesrgan-x4plus">realesrgan-x4plus</option>
-                        <option value="realesrnet-x4plus">realesrnet-x4plus</option>
-                        <option value="realesr-animevideov3">realesr-animevideov3</option>
-                        <option value="realesrgan-x4plus-anime">realesrgan-x4plus-anime</option>
-                    </select>
-                </div>
-                <div className="flex gap-3 mt-6">
-                    <Button onClick={handleUpscale} disabled={processing} className="w-full">
-                        {processing ? <Loader2 className="animate-spin" /> : "Upscale Videos"} {processing && `(${elapsedTime}s)`}
+            </div>
+
+            {/* Buttons */}
+            <div className="col-start-5 row-start-5 flex flex-col place-self-stretch">
+                <Button onClick={handleUpscale} disabled={processing} className="w-full p-4 rounded-none">
+                    {processing ? <Loader2 className="animate-spin" /> : "Upscale Videos"} {processing && `(${elapsedTime}s)`}
+                </Button>
+                {processing && (
+                    <Button onClick={handleCancel} variant="destructive" className="w-full flex items-center justify-center gap-2 rounded-none">
+                        <XCircle size={20} /> Cancel
                     </Button>
-                    {processing && (
-                        <Button onClick={handleCancel} variant="destructive" className="w-full">
-                            <XCircle size={20} /> Cancel
-                        </Button>
-                    )}
-                </div>
-                <div ref={logContainerRef} className="mt-6 bg-black p-4 rounded-lg h-40 overflow-auto text-green-400">
-                    <h2 className="text-lg font-semibold text-white">Terminal Logs:</h2>
-                    <pre className="text-sm whitespace-pre-wrap">{logs.join("\n")}</pre>
-                </div>
-            </motion.div>
+                )}
+            </div>
         </div>
+
     );
 }
 

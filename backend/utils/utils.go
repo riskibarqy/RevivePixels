@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -47,4 +48,11 @@ func IgnoreError(errString string) bool {
 		return true
 	}
 	return false
+}
+
+func GetSessionValue(sessionApps *sync.Map, key string) string {
+	if value, ok := sessionApps.Load(key); ok {
+		return value.(string)
+	}
+	return ""
 }

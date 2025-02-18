@@ -3,4 +3,6 @@
 
 export function CancelProcessing():Promise<void>;
 
+export function CleanupTempFolder():Promise<void>;
+
 export function ProcessVideosFromUpload(arg1:Array<string>,arg2:Array<string>,arg3:string):Promise<{[key: string]: string}>;

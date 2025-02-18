@@ -3,6 +3,14 @@ module.exports = {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
+    extends :{
+      colors: {
+        'anyingCOLOR' : '#ECDFCC',
+        // "secondary" : "#3C3D37",
+        // "tertiary" : "#697565",
+        // "quaternary" : "#ECDFCC"
+      }
+    },
     container: {
       center: true,
     },

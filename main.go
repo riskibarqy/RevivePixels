@@ -7,11 +7,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 
-	"github.com/riskibarqy/go-upscaler/backend"
-	"github.com/riskibarqy/go-upscaler/backend/datatransfers"
-	"github.com/riskibarqy/go-upscaler/backend/utils"
+	"github.com/google/uuid"
+	"github.com/riskibarqy/RevivePixels/backend"
+	"github.com/riskibarqy/RevivePixels/backend/datatransfers"
+	"github.com/riskibarqy/RevivePixels/backend/utils"
 
 	"os"
 	"strings"
@@ -29,17 +33,26 @@ var assets embed.FS
 var logger *utils.CustomLogger
 var cancelFunc context.CancelFunc
 
+const (
+	CtxKeyRootTempDir = "rootTempDir"
+	CtxAppName        = "appName"
+	CtxSessionID      = "sessionId"
+)
+
 // App struct
 type App struct {
 	ctx           context.Context
 	videoUpscaler backend.VideoUpscalerUsecase
+	sessionApps   *sync.Map // Store session data
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
-	videoUpscaler := backend.NewVideoUpscaler(logger)
+	sessionApps := &sync.Map{} // Initialize sessionApps
+	videoUpscaler := backend.NewVideoUpscaler(logger, sessionApps)
 	return &App{
 		videoUpscaler: videoUpscaler,
+		sessionApps:   sessionApps,
 	}
 }
 
@@ -53,7 +66,7 @@ func (u *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceDa
 	go runtime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
 }
 
-func (b *App) beforeClose(ctx context.Context) (prevent bool) {
+func (u *App) beforeClose(ctx context.Context) (prevent bool) {
 	dialog, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:    runtime.QuestionDialog,
 		Title:   "Quit?",
@@ -64,11 +77,22 @@ func (b *App) beforeClose(ctx context.Context) (prevent bool) {
 		return false
 	}
 
-	return dialog != "Yes"
+	if dialog == "Yes" {
+		u.CleanupRootTempFolder() // Cleanup temp before exiting
+		return false
+	}
+	return true
 }
 
 func (u *App) startup(ctx context.Context) {
 	u.ctx = ctx
+
+	sessionId := utils.GetSessionValue(u.sessionApps, CtxSessionID)
+	appName := utils.GetSessionValue(u.sessionApps, CtxAppName)
+
+	tempDir, _ := os.MkdirTemp(os.TempDir(), fmt.Sprintf("%s-%s", appName, sessionId))
+
+	u.sessionApps.Store(CtxKeyRootTempDir, tempDir)
 
 	// Create a pipe to capture stderr
 	r, w, _ := os.Pipe()
@@ -76,12 +100,11 @@ func (u *App) startup(ctx context.Context) {
 
 	// Capture logs in a goroutine
 	go func() {
+		defer w.Close() // Close pipe when done
 		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
 			logMsg := strings.TrimSpace(scanner.Text())
 			if logMsg != "" {
-
-				// Send to frontend
 				runtime.EventsEmit(ctx, "stderr_log", logMsg)
 			}
 		}
@@ -96,6 +119,8 @@ func (u *App) startup(ctx context.Context) {
 func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
 
+	rootTempDir := utils.GetSessionValue(u.sessionApps, CtxKeyRootTempDir)
+
 	// Create a cancellable context
 	ctx, cancel := context.WithCancel(u.ctx)
 	cancelFunc = cancel // Store cancel function globally
@@ -109,7 +134,7 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 			continue
 		}
 
-		tempDir, err := os.MkdirTemp(os.TempDir(), "go-upscaler")
+		tempDir, err := os.MkdirTemp(rootTempDir, fmt.Sprintf("%d", i))
 		if err != nil {
 			runtime.LogError(ctx, fmt.Sprintf("failed create temp dir : %v", err))
 			continue
@@ -130,7 +155,7 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 			continue
 		}
 
-		savePath := outputFolder + "\\" + fmt.Sprintf("%d_upscaled_", utils.NowUnix()) + filenames[i]
+		savePath := filepath.Join(outputFolder, fmt.Sprintf("%d_upscaled_", utils.NowUnix())+filenames[i])
 
 		// Process video
 		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(ctx, &datatransfers.VideoUpscalerRequest{
@@ -162,7 +187,28 @@ func (u *App) CancelProcessing() {
 		cancelFunc() // Cancel all running tasks
 		fmt.Println("Processing canceled by user.")
 		logger.Warning("Processing canceled by user")
+		cancelFunc = nil // Reset cancelFunc to avoid conflicts
 	}
+}
+
+func (u *App) CleanupRootTempFolder() {
+	rootTempDir := utils.GetSessionValue(u.sessionApps, CtxKeyRootTempDir)
+	err := os.RemoveAll(rootTempDir)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+}
+
+func (u *App) gracefulShutdown() {
+	s := make(chan os.Signal, 1)
+	signal.Notify(s, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-s
+		u.CleanupRootTempFolder() // Cleanup before exiting
+		fmt.Println("Shutting down gracefully.")
+		os.Exit(0)
+	}()
 }
 
 func main() {
@@ -174,26 +220,45 @@ func main() {
 	}
 	defer logger.Close()
 
-	logger.Info("Application starting...")
-
 	app := NewApp()
 
+	appName := "revivePixels"
+	uuid := uuid.New().String()
+
+	app.sessionApps.Store(CtxSessionID, uuid)
+	app.sessionApps.Store(CtxAppName, appName)
+
+	logger.Info("Application starting...")
+	logger.Info("App Name : " + appName)
+	logger.Info("Session ID : " + uuid)
+
+	go app.gracefulShutdown()
+
+	// Ensure temp files are deleted on exit
+	defer app.CleanupRootTempFolder()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error(fmt.Sprintf("App crashed: %v", r))
+			app.CleanupRootTempFolder()
+		}
+	}()
+
 	err = wails.Run(&options.App{
-		Title: "AI Video Upscaler",
+		Title: appName,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
 		EnableDefaultContextMenu: true,
-		Width:                    600,
+		Width:                    1080,
 		Height:                   800,
 		DisableResize:            false,
 		Fullscreen:               false,
-		MinWidth:                 400,
-		MinHeight:                400,
+		MinWidth:                 800,
+		MinHeight:                600,
 		OnBeforeClose:            app.beforeClose,
 		OnStartup:                app.startup,
 		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId:               "e3984e08-28dc-4e3d-b70a-45e961589cdc",
+			UniqueId:               uuid,
 			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
 		},
 		Bind: []interface{}{

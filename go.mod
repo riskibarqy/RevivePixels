@@ -1,4 +1,4 @@
-module github.com/riskibarqy/go-upscaler
+module github.com/riskibarqy/RevivePixels
 
 go 1.23.6
 

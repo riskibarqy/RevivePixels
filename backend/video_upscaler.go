@@ -13,9 +13,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/riskibarqy/go-upscaler/backend/datatransfers"
-	"github.com/riskibarqy/go-upscaler/backend/models"
-	"github.com/riskibarqy/go-upscaler/backend/utils"
+	"github.com/riskibarqy/RevivePixels/backend/datatransfers"
+	"github.com/riskibarqy/RevivePixels/backend/models"
+	"github.com/riskibarqy/RevivePixels/backend/utils"
 
 	"github.com/google/uuid"
 )
@@ -31,12 +31,14 @@ type VideoUpscalerUsecase interface {
 }
 
 type videoUpscalerUsecase struct {
-	logger *utils.CustomLogger
+	logger      *utils.CustomLogger
+	sessionApps *sync.Map // Store sessionApps reference
 }
 
-func NewVideoUpscaler(logger *utils.CustomLogger) VideoUpscalerUsecase {
+func NewVideoUpscaler(logger *utils.CustomLogger, sessionApps *sync.Map) VideoUpscalerUsecase {
 	return &videoUpscalerUsecase{
-		logger: logger,
+		logger:      logger,
+		sessionApps: sessionApps,
 	}
 }
 
@@ -321,8 +323,9 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	}
 
 	u.logger.Info("cleaning temp files")
+	u.logger.Info("cleaning " + params.TempDir)
+
 	// Cleanup temp batch videos
-	os.RemoveAll(tempVideoDir)
 	os.RemoveAll(params.TempDir)
 
 	u.logger.Info("✅ Upscaling completed successfully!")

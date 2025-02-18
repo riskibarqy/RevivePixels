@@ -6,6 +6,10 @@ export function CancelProcessing() {
   return window['go']['main']['App']['CancelProcessing']();
 }
 
+export function CleanupTempFolder() {
+  return window['go']['main']['App']['CleanupTempFolder']();
+}
+
 export function ProcessVideosFromUpload(arg1, arg2, arg3) {
   return window['go']['main']['App']['ProcessVideosFromUpload'](arg1, arg2, arg3);
 }
