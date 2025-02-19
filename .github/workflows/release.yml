@@ -18,30 +18,26 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.21
+          cache: true  # Cache Go dependencies
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'  # Cache Node modules
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      - name: Install Dependencies
-        run: npm install
+      - name: Install Dependencies (if needed)
+        run: npm ci  # Faster and ensures clean install
         working-directory: frontend
 
       - name: Build Wails App
-        run: wails build -platform windows/amd64
+        run: wails build -platform windows/amd64 --clean
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: wails-app
           path: build/bin/*.exe
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: build/bin/*.exe
-          token: ${{ secrets.GITHUB_TOKEN }} 
