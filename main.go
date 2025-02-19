@@ -103,6 +103,18 @@ func (u *App) ExtractRealEsrgan() error {
 		return err
 	}
 
+	// // Extract Real-ESRGAN executable
+	// vcomp140Path := filepath.Join(rootTempDir, "vcomp140.dll")
+	// if err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, "embeds/realesrgan/vcomp140.dll", vcomp140Path); err != nil {
+	// 	return err
+	// }
+
+	// // Extract Real-ESRGAN executable
+	// vcomp140dPath := filepath.Join(rootTempDir, "vcomp140d.dll")
+	// if err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, "embeds/realesrgan/vcomp140d.dll", vcomp140dPath); err != nil {
+	// 	return err
+	// }
+
 	// Extract model files
 	modelsDir := filepath.Join(rootTempDir, "models")
 	if err := os.MkdirAll(modelsDir, 0755); err != nil {
@@ -124,7 +136,7 @@ func (u *App) ExtractRealEsrgan() error {
 
 	for _, model := range modelFiles {
 		dst := filepath.Join(modelsDir, filepath.Base(model))
-		err := extractFileEmbedded(constants.CtxRealesrganPath, model, dst)
+		err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, model, dst)
 		if err != nil {
 			log.Printf("Failed to extract %s: %v", model, err)
 		} else {
