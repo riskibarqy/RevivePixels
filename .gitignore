@@ -2,3 +2,5 @@ build/bin
 node_modules
 frontend/dist
 app.log
+embeds/ffmpeg/ffmpeg.exe
+embeds/ffmpeg/ffprobe.exe
