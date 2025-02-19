@@ -153,8 +153,6 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 				"-n", params.Model,
 			)
 
-			u.logger.Info(cmd.String())
-
 			if err := runCommand(cmd); err != nil {
 				errChan <- fmt.Errorf("failed to upscale frame %s: %w", frame, err)
 			}
