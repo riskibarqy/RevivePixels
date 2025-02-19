@@ -208,9 +208,9 @@ func (u *App) startup(ctx context.Context) {
 		log.Fatal("Failed to extract Real-ESRGAN:", err)
 	}
 
-	u.sessionApps.Store(constants.CtxFFmpegPath, "ffmpeg.exe")
-	u.sessionApps.Store(constants.CtxFFprobePath, "ffprobe.exe")
-	u.sessionApps.Store(constants.CtxRealesrganPath, "realesrgan-ncnn-vulkan.exe")
+	u.sessionApps.Store(constants.CtxFFmpegPath, tempDir+"/ffmpeg.exe")
+	u.sessionApps.Store(constants.CtxFFprobePath, tempDir+"/ffprobe.exe")
+	u.sessionApps.Store(constants.CtxRealesrganPath, tempDir+"/realesrgan-ncnn-vulkan.exe")
 
 	if err := config.InitializePaths(u.sessionApps); err != nil {
 		log.Fatal("Failed to initialize paths:", err)
