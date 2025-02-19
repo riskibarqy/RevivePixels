@@ -181,7 +181,7 @@ function App() {
                                 {/* File Info */}
                                 <div className="flex-1 overflow-hidden">
                                     <span className="text-white block truncate">{file.name}</span>
-                                    <span className="text-sm text-gray-400">{(file.size / (1024 * 1024)).toFixed(2) + " MB " +status}</span>
+                                    <span className="text-sm text-gray-400">{(file.size / (1024 * 1024)).toFixed(2) + " MB "}</span>
                                 </div>
 
                                 {/* Remove Button */}

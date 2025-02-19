@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/riskibarqy/RevivePixels/backend"
+	config "github.com/riskibarqy/RevivePixels/backend/confiig"
+	"github.com/riskibarqy/RevivePixels/backend/constants"
 	"github.com/riskibarqy/RevivePixels/backend/datatransfers"
 	"github.com/riskibarqy/RevivePixels/backend/utils"
 
@@ -30,14 +32,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed embeds/ffmpeg/ffmpeg.exe embeds/ffmpeg/ffprobe.exe
+var embeddedFFmpeg embed.FS
+
+//go:embed embeds/realesrgan/realesrgan-ncnn-vulkan.exe embeds/realesrgan/models/*
+var embeddedRealEsrgan embed.FS
+
 var logger *utils.CustomLogger
 var cancelFunc context.CancelFunc
-
-const (
-	CtxKeyRootTempDir = "rootTempDir"
-	CtxAppName        = "appName"
-	CtxSessionID      = "sessionId"
-)
 
 // App struct
 type App struct {
@@ -54,6 +56,108 @@ func NewApp() *App {
 		videoUpscaler: videoUpscaler,
 		sessionApps:   sessionApps,
 	}
+}
+
+// Extracts ffmpeg & ffprobe to a temp directory
+func (u *App) ExtractFFmpeg() error {
+	tempDirRaw, ok := u.sessionApps.Load(constants.CtxKeyRootTempDir)
+	if !ok {
+		return fmt.Errorf("rootTempDir not found in session")
+	}
+
+	rootTempDir, ok := tempDirRaw.(string)
+	if !ok {
+		return fmt.Errorf("rootTempDir is not a string")
+	}
+
+	// Extract ffmpeg
+	ffmpegPath := filepath.Join(rootTempDir, "ffmpeg.exe")
+	if err := extractFileEmbedded(constants.FileTypeEmbedFFMPEG, "embeds/ffmpeg/ffmpeg.exe", ffmpegPath); err != nil {
+		return err
+	}
+
+	// Extract ffprobe
+	ffprobePath := filepath.Join(rootTempDir, "ffprobe.exe")
+	if err := extractFileEmbedded(constants.FileTypeEmbedFFMPEG, "embeds/ffmpeg/ffprobe.exe", ffprobePath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Extracts realersgan and its model to a temp directory
+func (u *App) ExtractRealEsrgan() error {
+	tempDirRaw, ok := u.sessionApps.Load(constants.CtxKeyRootTempDir)
+	if !ok {
+		return fmt.Errorf("rootTempDir not found in session")
+	}
+
+	rootTempDir, ok := tempDirRaw.(string)
+	if !ok {
+		return fmt.Errorf("rootTempDir is not a string")
+	}
+
+	// Extract Real-ESRGAN executable
+	esrganPath := filepath.Join(rootTempDir, "realesrgan-ncnn-vulkan.exe")
+	if err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, "embeds/realesrgan/realesrgan-ncnn-vulkan.exe", esrganPath); err != nil {
+		return err
+	}
+
+	// Extract model files
+	modelsDir := filepath.Join(rootTempDir, "models")
+	if err := os.MkdirAll(modelsDir, 0755); err != nil {
+		return err
+	}
+
+	modelFiles := []string{
+		"embeds/realesrgan/models/realesr-animevideov3-x2.bin",
+		"embeds/realesrgan/models/realesr-animevideov3-x2.param",
+		"embeds/realesrgan/models/realesr-animevideov3-x3.bin",
+		"embeds/realesrgan/models/realesr-animevideov3-x3.param",
+		"embeds/realesrgan/models/realesr-animevideov3-x4.bin",
+		"embeds/realesrgan/models/realesr-animevideov3-x4.param",
+		"embeds/realesrgan/models/realesrgan-x4plus-anime.bin",
+		"embeds/realesrgan/models/realesrgan-x4plus-anime.param",
+		"embeds/realesrgan/models/realesrgan-x4plus.bin",
+		"embeds/realesrgan/models/realesrgan-x4plus.param",
+	}
+
+	for _, model := range modelFiles {
+		dst := filepath.Join(modelsDir, filepath.Base(model))
+		err := extractFileEmbedded(constants.CtxRealesrganPath, model, dst)
+		if err != nil {
+			log.Printf("Failed to extract %s: %v", model, err)
+		} else {
+			log.Printf("Extracted model: %s", dst)
+		}
+	}
+
+	return nil
+}
+
+// Helper function to extract a file
+func extractFileEmbedded(filetype, src string, dst string) error {
+	var err error
+	var data []byte
+
+	switch filetype {
+	case constants.FileTypeEmbedFFMPEG:
+		data, err = embeddedFFmpeg.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded file %s: %v", src, err)
+		}
+	case constants.FileTypeEmbedRealesrgan:
+		data, err = embeddedRealEsrgan.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded file %s: %v", src, err)
+		}
+	}
+
+	if err := os.WriteFile(dst, data, 0755); err != nil {
+		return fmt.Errorf("failed to write file %s: %v", dst, err)
+	}
+
+	return nil
 }
 
 func (u *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceData) {
@@ -87,12 +191,30 @@ func (u *App) beforeClose(ctx context.Context) (prevent bool) {
 func (u *App) startup(ctx context.Context) {
 	u.ctx = ctx
 
-	sessionId := utils.GetSessionValue(u.sessionApps, CtxSessionID)
-	appName := utils.GetSessionValue(u.sessionApps, CtxAppName)
+	sessionId := utils.GetSessionValue(u.sessionApps, constants.CtxSessionID)
+	appName := utils.GetSessionValue(u.sessionApps, constants.CtxAppName)
 
 	tempDir, _ := os.MkdirTemp(os.TempDir(), fmt.Sprintf("%s-%s", appName, sessionId))
 
-	u.sessionApps.Store(CtxKeyRootTempDir, tempDir)
+	u.sessionApps.Store(constants.CtxKeyRootTempDir, tempDir)
+
+	err := u.ExtractFFmpeg()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = u.ExtractRealEsrgan()
+	if err != nil {
+		log.Fatal("Failed to extract Real-ESRGAN:", err)
+	}
+
+	u.sessionApps.Store(constants.CtxFFmpegPath, "ffmpeg.exe")
+	u.sessionApps.Store(constants.CtxFFprobePath, "ffprobe.exe")
+	u.sessionApps.Store(constants.CtxRealesrganPath, "realesrgan-ncnn-vulkan.exe")
+
+	if err := config.InitializePaths(u.sessionApps); err != nil {
+		log.Fatal("Failed to initialize paths:", err)
+	}
 
 	// Create a pipe to capture stderr
 	r, w, _ := os.Pipe()
@@ -119,7 +241,7 @@ func (u *App) startup(ctx context.Context) {
 func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
 	results := make(map[string]string)
 
-	rootTempDir := utils.GetSessionValue(u.sessionApps, CtxKeyRootTempDir)
+	rootTempDir := utils.GetSessionValue(u.sessionApps, constants.CtxKeyRootTempDir)
 
 	// Create a cancellable context
 	ctx, cancel := context.WithCancel(u.ctx)
@@ -192,7 +314,7 @@ func (u *App) CancelProcessing() {
 }
 
 func (u *App) CleanupRootTempFolder() {
-	rootTempDir := utils.GetSessionValue(u.sessionApps, CtxKeyRootTempDir)
+	rootTempDir := utils.GetSessionValue(u.sessionApps, constants.CtxKeyRootTempDir)
 	err := os.RemoveAll(rootTempDir)
 	if err != nil {
 		logger.Error(err.Error())
@@ -225,8 +347,8 @@ func main() {
 	appName := "revivePixels"
 	uuid := uuid.New().String()
 
-	app.sessionApps.Store(CtxSessionID, uuid)
-	app.sessionApps.Store(CtxAppName, appName)
+	app.sessionApps.Store(constants.CtxSessionID, uuid)
+	app.sessionApps.Store(constants.CtxAppName, appName)
 
 	logger.Info("Application starting...")
 	logger.Info("App Name : " + appName)

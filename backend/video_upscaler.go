@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	config "github.com/riskibarqy/RevivePixels/backend/confiig"
 	"github.com/riskibarqy/RevivePixels/backend/datatransfers"
 	"github.com/riskibarqy/RevivePixels/backend/models"
 	"github.com/riskibarqy/RevivePixels/backend/utils"
@@ -36,6 +37,7 @@ type videoUpscalerUsecase struct {
 }
 
 func NewVideoUpscaler(logger *utils.CustomLogger, sessionApps *sync.Map) VideoUpscalerUsecase {
+
 	return &videoUpscalerUsecase{
 		logger:      logger,
 		sessionApps: sessionApps,
@@ -51,7 +53,7 @@ func runCommand(cmd *exec.Cmd) error {
 // ExtractVideoFrames extracts a batch of frames from the video to reduce memory usage
 func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount int) error {
 	outputPattern := filepath.Join(frameDir, "frame_%04d.png")
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath,
 		"-i", videoPath,
 		"-vf", fmt.Sprintf("select=between(n\\,%d\\,%d)", startFrame, startFrame+frameCount-1),
 		"-vsync", "vfr",
@@ -72,7 +74,7 @@ func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir,
 
 // GetVideoFrames returns the number of frames and FPS of a video.
 func (u *videoUpscalerUsecase) GetVideoFrames(ctx context.Context, inputPath string) (int, int, error) {
-	cmd := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0",
+	cmd := exec.CommandContext(ctx, config.Paths.FFprobePath, "-v", "error", "-select_streams", "v:0",
 		"-show_entries", "stream=nb_frames,r_frame_rate", "-of", "json", inputPath)
 	utils.HideWindowsCMD(cmd)
 	output, err := cmd.Output()
@@ -111,13 +113,13 @@ func (u *videoUpscalerUsecase) ExtractAudio(ctx context.Context, params *datatra
 		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", "-i", params.TempFilePath, "-vn", "-acodec", "copy", params.TempDir+"/"+params.AudioFileName)
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath, "-i", params.TempFilePath, "-vn", "-acodec", "copy", params.TempDir+"/"+params.AudioFileName)
 	return runCommand(cmd)
 }
 
 // hasAudioStream checks if a video contains an audio stream
 func (u *videoUpscalerUsecase) hasAudioStream(ctx context.Context, videoPath string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "ffprobe", "-i", videoPath, "-show_streams", "-select_streams", "a", "-loglevel", "error")
+	cmd := exec.CommandContext(ctx, config.Paths.FFprobePath, "-i", videoPath, "-show_streams", "-select_streams", "a", "-loglevel", "error")
 	utils.HideWindowsCMD(cmd)
 	output, err := cmd.Output()
 	if err != nil {
@@ -140,7 +142,7 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 			defer func() { <-sem }() // Release slot
 
 			outputFrame := filepath.Join(frameDir, "upscaled_"+filepath.Base(frame))
-			cmd := exec.CommandContext(ctx, "realesrgan-ncnn-vulkan",
+			cmd := exec.CommandContext(ctx, config.Paths.RealEsrganPath,
 				"-i", frame,
 				"-o", outputFrame,
 				"-s", "2",
@@ -185,7 +187,7 @@ func (u *videoUpscalerUsecase) ReassembleVideo(ctx context.Context, frameDir, ou
 		return fmt.Errorf("no upscaled frames found in %s", frameDir)
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath,
 		"-framerate", fmt.Sprintf("%d", params.VideoFPS),
 		"-i", framePattern,
 		"-c:v", "libx264",
@@ -231,7 +233,7 @@ func (u *videoUpscalerUsecase) MergeVideos(ctx context.Context, videoPaths []str
 	cmdArgs = append(cmdArgs, "-y", params.SavePath) // "-y" forces overwrite
 
 	// Execute command
-	cmd := exec.CommandContext(ctx, "ffmpeg", cmdArgs...)
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath, cmdArgs...)
 	return runCommand(cmd)
 }
 
@@ -269,7 +271,7 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	}
 
 	// Process in batches
-	batchSize := 100
+	batchSize := 1800
 	tempVideos := []string{}
 
 	for i := 0; i < totalFrames; i += batchSize {

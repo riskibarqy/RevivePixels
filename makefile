@@ -15,3 +15,6 @@ release:
 	@echo "🚀 Releasing new version: $(NEW_VERSION)"
 	@git tag $(NEW_VERSION)
 	@git push origin $(NEW_VERSION)
+
+build-windows:
+	@wails build -platform windows/amd64 --clean

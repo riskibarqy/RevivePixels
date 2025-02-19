@@ -10,3 +10,17 @@ const (
 	LogLevelError   LogLevel = "error"
 	LogLevelFatal   LogLevel = "fatal"
 )
+
+const (
+	CtxKeyRootTempDir = "rootTempDir"
+	CtxAppName        = "appName"
+	CtxSessionID      = "sessionId"
+	CtxFFmpegPath     = "ffmpegPath"
+	CtxFFprobePath    = "ffprobePath"
+	CtxRealesrganPath = "realesrganPath"
+)
+
+const (
+	FileTypeEmbedFFMPEG     = "ffmpeg"
+	FileTypeEmbedRealesrgan = "realesrgan"
+)

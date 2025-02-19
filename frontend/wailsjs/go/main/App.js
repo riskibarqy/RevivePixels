@@ -6,8 +6,16 @@ export function CancelProcessing() {
   return window['go']['main']['App']['CancelProcessing']();
 }
 
-export function CleanupTempFolder() {
-  return window['go']['main']['App']['CleanupTempFolder']();
+export function CleanupRootTempFolder() {
+  return window['go']['main']['App']['CleanupRootTempFolder']();
+}
+
+export function ExtractFFmpeg() {
+  return window['go']['main']['App']['ExtractFFmpeg']();
+}
+
+export function ExtractRealEsrgan() {
+  return window['go']['main']['App']['ExtractRealEsrgan']();
 }
 
 export function ProcessVideosFromUpload(arg1, arg2, arg3) {
