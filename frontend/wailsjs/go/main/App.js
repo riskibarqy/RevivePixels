@@ -18,6 +18,6 @@ export function ExtractRealEsrgan() {
   return window['go']['main']['App']['ExtractRealEsrgan']();
 }
 
-export function ProcessVideosFromUpload(arg1, arg2, arg3) {
-  return window['go']['main']['App']['ProcessVideosFromUpload'](arg1, arg2, arg3);
+export function ProcessVideosFromUpload(arg1) {
+  return window['go']['main']['App']['ProcessVideosFromUpload'](arg1);
 }

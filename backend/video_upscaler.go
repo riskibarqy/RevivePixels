@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	config "github.com/riskibarqy/RevivePixels/backend/confiig"
 	"github.com/riskibarqy/RevivePixels/backend/datatransfers"
@@ -23,8 +27,8 @@ import (
 
 type VideoUpscalerUsecase interface {
 	ExtractAudio(ctx context.Context, params *datatransfers.VideoUpscalerRequest) error
-	ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount int) error
-	GetVideoFrames(ctx context.Context, inputPath string) (int, int, error)
+	ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount, scaleMultiplier int, videoMetadata *datatransfers.FFProbeStreamsMetadataResponse) error
+	GetVideoMetadata(ctx context.Context, inputPath string) (*datatransfers.FFProbeStreamsMetadataResponse, error)
 	MergeVideos(ctx context.Context, videoPaths []string, params *datatransfers.VideoUpscalerRequest) error
 	ReassembleVideo(ctx context.Context, frameDir, outputPath string, params *datatransfers.VideoUpscalerRequest) error
 	UpscaleFrames(ctx context.Context, frames []string, frameDir string, params *datatransfers.VideoUpscalerRequest) error
@@ -50,41 +54,20 @@ func runCommand(cmd *exec.Cmd) error {
 	return cmd.Run()
 }
 
-// ExtractVideoFrames extracts a batch of frames from the video to reduce memory usage
-func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount int) error {
-	outputPattern := filepath.Join(frameDir, "frame_%04d.png")
-	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath,
-		"-i", videoPath,
-		"-vf", fmt.Sprintf("select=between(n\\,%d\\,%d)", startFrame, startFrame+frameCount-1),
-		"-vsync", "vfr",
-		outputPattern,
-	)
-
-	// Capture error output
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	err := runCommand(cmd)
-	if err != nil {
-		return fmt.Errorf("error extracting frames: %v", err)
-	}
-
-	return nil
-}
-
-// GetVideoFrames returns the number of frames and FPS of a video.
-func (u *videoUpscalerUsecase) GetVideoFrames(ctx context.Context, inputPath string) (int, int, error) {
+// GetVideoMetadata returns the number of frames and FPS of a video.
+func (u *videoUpscalerUsecase) GetVideoMetadata(ctx context.Context, inputPath string) (*datatransfers.FFProbeStreamsMetadataResponse, error) {
 	cmd := exec.CommandContext(ctx, config.Paths.FFprobePath, "-v", "error", "-select_streams", "v:0",
-		"-show_entries", "stream=nb_frames,r_frame_rate", "-of", "json", inputPath)
+		"-show_entries", "stream=nb_frames,r_frame_rate,width,height", "-of", "json", inputPath)
 	utils.HideWindowsCMD(cmd)
+
 	output, err := cmd.Output()
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
 	var probe models.FFProbeOutput
 	if err := json.Unmarshal(output, &probe); err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 
 	nbFrames, _ := strconv.Atoi(probe.Streams[0].NbFrames)
@@ -97,7 +80,58 @@ func (u *videoUpscalerUsecase) GetVideoFrames(ctx context.Context, inputPath str
 
 	u.logger.Info(fmt.Sprintf("ℹ️ Video has %d frames at %d FPS", nbFrames, fps))
 
-	return nbFrames, fps, nil
+	return &datatransfers.FFProbeStreamsMetadataResponse{
+		TotalFrames: nbFrames,
+		FPS:         fps,
+		Width:       probe.Streams[0].Width,
+		Height:      probe.Streams[0].Height,
+	}, nil
+}
+
+// ExtractVideoFrames extracts a batch of frames from the video to reduce memory usage
+func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount, scaleMultiplier int, videoMetadata *datatransfers.FFProbeStreamsMetadataResponse) error {
+	// If either dimension is below 360, do not rescale
+	if videoMetadata.Width < 360 || videoMetadata.Height < 360 {
+		scaleMultiplier = 1 // No scaling
+	} else {
+		// Ensure scale is ≤ 2 by dividing iteratively
+		for scaleMultiplier > 2 {
+			scaleMultiplier /= 2
+		}
+	}
+
+	// Construct scale filter only if needed
+	scaleFilter := ""
+	if scaleMultiplier > 1 {
+		scaleFilter = fmt.Sprintf("scale='if(gt(iw,360),iw/%d,iw)':'if(gt(ih,360),ih/%d,ih)':force_original_aspect_ratio=decrease", scaleMultiplier, scaleMultiplier)
+	}
+
+	outputPattern := filepath.Join(frameDir, "frame_%04d.png")
+	cmdArgs := []string{
+		"-i", videoPath,
+		"-vf", fmt.Sprintf("select=between(n\\,%d\\,%d)%s", startFrame, startFrame+frameCount-1,
+			func() string {
+				if scaleFilter != "" {
+					return "," + scaleFilter
+				}
+				return ""
+			}()),
+		"-fps_mode", "vfr",
+		outputPattern,
+	}
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath, cmdArgs...)
+
+	// Capture error output
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err := runCommand(cmd)
+	if err != nil {
+		u.logger.Error(stderr.String())
+		return fmt.Errorf("error extracting frames: %v", err)
+	}
+
+	return nil
 }
 
 // ExtractAudio extracts the audio track from a video if available.
@@ -131,30 +165,56 @@ func (u *videoUpscalerUsecase) hasAudioStream(ctx context.Context, videoPath str
 // UpscaleFrames processes multiple frames in parallel using Real-ESRGAN.
 func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []string, frameDir string, params *datatransfers.VideoUpscalerRequest) error {
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)            // Max 4 concurrent processes
-	errChan := make(chan error, len(frames)) // Collect errors
+	semaphore := make(chan struct{}, runtime.NumCPU()) // Max 4 concurrent processes
+	errChan := make(chan error, len(frames))           // Collect errors
+
+	var processedFrames int32 = 0 // Track number of completed frames
+	totalFrames := len(frames)
+
+	// Calculate progress range per batch
+	progressStart := 15
+	progressEnd := 85
+	progressRange := progressEnd - progressStart
+
+	// Per-batch progress increase
+	batchProgress := float64(progressRange) / float64(params.TotalBatches)
+
+	// Progress range for the current batch
+	batchStart := progressStart + int(batchProgress*float64(params.CurrentBatch-1))
+	batchEnd := batchStart + int(batchProgress)
+
+	progressStep := int32(math.Max(1, float64(totalFrames)/20)) // Log progress every ~5%
 
 	for _, frame := range frames {
 		wg.Add(1)
 		go func(frame string) {
 			defer wg.Done()
-			sem <- struct{}{}        // Acquire slot
-			defer func() { <-sem }() // Release slot
+			semaphore <- struct{}{}        // Acquire slot
+			defer func() { <-semaphore }() // Release slot
 
 			outputFrame := filepath.Join(frameDir, "upscaled_"+filepath.Base(frame))
 			cmd := exec.CommandContext(ctx, config.Paths.RealEsrganPath,
 				"-i", frame,
 				"-o", outputFrame,
-				"-s", "2",
-				"-t", "1024",
-				"-g", "0",
-				"-j", "16:16:16",
-				" --fp16",
+				"-s", fmt.Sprintf("%d", params.ScaleMultiplier),
+				"-t", "0", /* tile size (>=32/0=auto, default=0) can be 0,0,0 for multi-gpu */
 				"-n", params.Model,
+				"-g", "0", /* gpu device to use (default=auto) can be 0,1,2 for multi-gpu */
+				// "-j", "16:16:16", /* thread count for load/proc/save (default=1:2:2) can be 1:2,2,2:2 for multi-gpu */
+				// " --fp16",
 			)
 
 			if err := runCommand(cmd); err != nil {
 				errChan <- fmt.Errorf("failed to upscale frame %s: %w", frame, err)
+			}
+
+			// Update Progress (Per-Batch Scaling)
+			completed := atomic.AddInt32(&processedFrames, 1)
+			if completed%progressStep == 0 || completed == int32(totalFrames) {
+				progress := batchStart + int((float64(completed)/float64(totalFrames))*(float64(batchEnd-batchStart)))
+				params.LoadingProgress = progress
+
+				u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName))
 			}
 		}(frame)
 	}
@@ -239,6 +299,9 @@ func (u *videoUpscalerUsecase) MergeVideos(ctx context.Context, videoPaths []str
 
 // ✅ Upscaling function using Real-ESRGAN with batch processing
 func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, params *datatransfers.VideoUpscalerRequest) error {
+	startTime := time.Now() // Track overall process start time
+	params.LoadingProgress = 0
+
 	u.logger.Info(fmt.Sprintf("🚀 Starting upscale: %s with model: %s", params.InputFullFileName, params.Model))
 
 	// Check if input file exists
@@ -252,16 +315,22 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 		return fmt.Errorf("failed to create temp video directory: %v", err)
 	}
 
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 5% - Initial setup done
+
 	u.logger.Info("Getting video details")
 	// Get total frames and FPS
-	totalFrames, videoFPS, err := u.GetVideoFrames(ctx, params.TempFilePath)
+	videoMetaData, err := u.GetVideoMetadata(ctx, params.TempFilePath)
 	if err != nil {
 		return fmt.Errorf("error getting video details: %v", err)
 	}
 
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 10% - Retrieved video details
+
 	// Ensure FPS is set
 	if params.VideoFPS == 0 {
-		params.VideoFPS = videoFPS
+		params.VideoFPS = videoMetaData.FPS
 	}
 
 	params.AudioFileName = fmt.Sprintf("%s.aac", params.InputPlainFileName) // Extract audio if available
@@ -270,11 +339,19 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 		return fmt.Errorf("error extracting audio: %v", err)
 	}
 
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 15% - Extracted audio
+
 	// Process in batches
-	batchSize := 1800
+	batchSize := 150
 	tempVideos := []string{}
+	totalFrames := videoMetaData.TotalFrames
+	totalBatches := (totalFrames + batchSize - 1) / batchSize
+	params.TotalBatches = totalBatches
 
 	for i := 0; i < totalFrames; i += batchSize {
+		batchStartTime := time.Now() // Track time per batch
+
 		uuid := uuid.New().String()
 		endFrame := i + batchSize - 1
 		if endFrame >= totalFrames {
@@ -286,10 +363,10 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 			return fmt.Errorf("failed to create batch directory: %v", err)
 		}
 
-		u.logger.Info(fmt.Sprintf("🔄 Processing frames %d - %d", i, endFrame))
+		u.logger.Info(fmt.Sprintf("🔄 Processing frames %d - %d", i+1, endFrame+1))
 
 		// Extract frames
-		if err := u.ExtractVideoFrames(ctx, batchFrameDir, params.TempFilePath, i, endFrame-i+1); err != nil {
+		if err := u.ExtractVideoFrames(ctx, batchFrameDir, params.TempFilePath, i, endFrame-i+1, params.ScaleMultiplier, videoMetaData); err != nil {
 			return fmt.Errorf("error extracting batch: %v", err)
 		}
 
@@ -300,10 +377,13 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 			return fmt.Errorf("no frames found in %s", batchFrameDir)
 		}
 
+		params.CurrentBatch = (i / batchSize) + 1
+
 		// Upscale frames
 		if err := u.UpscaleFrames(ctx, frames, batchFrameDir, params); err != nil {
 			return fmt.Errorf("error upscaling batch: %v", err)
 		}
+
 		// Create batch video
 		batchVideoPath := filepath.Join(tempVideoDir, fmt.Sprintf("temp_batch_%s.mp4", uuid))
 
@@ -316,21 +396,40 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 		// Cleanup batch frames
 		os.RemoveAll(batchFrameDir)
 
+		// Dynamic ETA Calculation
+		processedFrames := endFrame + 1
+		elapsedTime := time.Since(startTime).Seconds()
+		remainingFrames := totalFrames - processedFrames
+
+		avgTimePerFrame := elapsedTime / float64(processedFrames)
+		estimatedRemainingTime := time.Duration(avgTimePerFrame * float64(remainingFrames) * float64(time.Second))
+
+		batchElapsed := time.Since(batchStartTime).Seconds()
+		u.logger.Info(fmt.Sprintf("🔄 Batch %d/%d completed in %.2fs. ETA: %s", (i/batchSize)+1, (totalFrames/batchSize)+1, batchElapsed, estimatedRemainingTime.Round(time.Second)))
 	}
 
-	u.logger.Info("merging video")
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 85% - Finished processing all batches
+
+	u.logger.Info("Merging video")
 	// Merge all batch videos into the final video
 	if err := u.MergeVideos(ctx, tempVideos, params); err != nil {
 		return fmt.Errorf("error merging final video: %v", err)
 	}
 
-	u.logger.Info("cleaning temp files")
-	u.logger.Info("cleaning " + params.TempDir)
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 95% - Merging done, starting cleanup
+
+	u.logger.Info("Cleaning temp files")
+	u.logger.Info("Cleaning " + params.TempDir)
 
 	// Cleanup temp batch videos
 	os.RemoveAll(params.TempDir)
 
-	u.logger.Info("✅ Upscaling completed successfully!")
+	params.LoadingProgress += 5
+	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 100% - Process complete
+	totalElapsed := time.Since(startTime).Seconds()
+	u.logger.Info(fmt.Sprintf("✅ Upscaling completed successfully in %dm%.2fs!", int(totalElapsed/60), totalElapsed))
 
 	return nil
 }

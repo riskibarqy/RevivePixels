@@ -14,4 +14,22 @@ type VideoUpscalerRequest struct {
 	TileSize           int // Real-ESRGAN parameter: Default = 0 (auto). Higher values improve detail but increase GPU memory usage.
 	SavePath           string
 	IsHaveAudio        bool
+	LoadingProgress    int
+	TotalBatches       int
+	CurrentBatch       int
+}
+
+type InputFileRequest struct {
+	FileCode   string
+	FileBase64 string
+	FileName   string
+	Model      string
+	Scale      int
+}
+
+type FFProbeStreamsMetadataResponse struct {
+	TotalFrames int
+	FPS         int
+	Height      int
+	Width       int
 }

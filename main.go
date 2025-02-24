@@ -103,18 +103,6 @@ func (u *App) ExtractRealEsrgan() error {
 		return err
 	}
 
-	// // Extract Real-ESRGAN executable
-	// vcomp140Path := filepath.Join(rootTempDir, "vcomp140.dll")
-	// if err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, "embeds/realesrgan/vcomp140.dll", vcomp140Path); err != nil {
-	// 	return err
-	// }
-
-	// // Extract Real-ESRGAN executable
-	// vcomp140dPath := filepath.Join(rootTempDir, "vcomp140d.dll")
-	// if err := extractFileEmbedded(constants.FileTypeEmbedRealesrgan, "embeds/realesrgan/vcomp140d.dll", vcomp140dPath); err != nil {
-	// 	return err
-	// }
-
 	// Extract model files
 	modelsDir := filepath.Join(rootTempDir, "models")
 	if err := os.MkdirAll(modelsDir, 0755); err != nil {
@@ -132,6 +120,12 @@ func (u *App) ExtractRealEsrgan() error {
 		"embeds/realesrgan/models/realesrgan-x4plus-anime.param",
 		"embeds/realesrgan/models/realesrgan-x4plus.bin",
 		"embeds/realesrgan/models/realesrgan-x4plus.param",
+		"embeds/realesrgan/models/realesrnet-x4plus.bin",
+		"embeds/realesrgan/models/realesrnet-x4plus.param",
+		"embeds/realesrgan/models/RealESRGANv2-animevideo-xsx2.bin",
+		"embeds/realesrgan/models/RealESRGANv2-animevideo-xsx2.param",
+		"embeds/realesrgan/models/RealESRGANv2-animevideo-xsx4.bin",
+		"embeds/realesrgan/models/RealESRGANv2-animevideo-xsx4.param",
 	}
 
 	for _, model := range modelFiles {
@@ -250,7 +244,7 @@ func (u *App) startup(ctx context.Context) {
 }
 
 // ProcessVideosFromUpload handles uploaded files, saves them, and processes them
-func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, model string) map[string]string {
+func (u *App) ProcessVideosFromUpload(requests []*datatransfers.InputFileRequest) map[string]string {
 	results := make(map[string]string)
 
 	rootTempDir := utils.GetSessionValue(u.sessionApps, constants.CtxKeyRootTempDir)
@@ -260,11 +254,11 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 	cancelFunc = cancel // Store cancel function globally
 
 	outputFolder, _ := utils.GetOutputVideoFolder()
-	for i, base64Data := range filesBase64 {
+	for i, request := range requests {
 		// Decode Base64 to []byte
-		fileBytes, err := base64.StdEncoding.DecodeString(base64Data)
+		fileBytes, err := base64.StdEncoding.DecodeString(request.FileBase64)
 		if err != nil {
-			results[filenames[i]] = "Failed to decode: " + err.Error()
+			results[request.FileName] = "Failed to decode: " + err.Error()
 			continue
 		}
 
@@ -275,21 +269,21 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 		}
 
 		// Save file to temp directory
-		tempFilePath := fmt.Sprintf("%s\\%s", tempDir, filenames[i])
+		tempFilePath := fmt.Sprintf("%s\\%s", tempDir, request.FileName)
 		err = os.WriteFile(tempFilePath, fileBytes, 0644)
 		if err != nil {
-			results[filenames[i]] = "Failed to save: " + err.Error()
+			results[request.FileName] = "Failed to save: " + err.Error()
 			continue
 		}
 
 		// ** Get File Details **
 		fileInfo, err := os.Stat(tempFilePath)
 		if err != nil {
-			results[filenames[i]] = "Failed to get file info: " + err.Error()
+			results[request.FileName] = "Failed to get file info: " + err.Error()
 			continue
 		}
 
-		savePath := filepath.Join(outputFolder, fmt.Sprintf("%d_upscaled_", utils.NowUnix())+filenames[i])
+		savePath := filepath.Join(outputFolder, fmt.Sprintf("%d_upscaled_", utils.NowUnix())+request.FileName)
 
 		// Process video
 		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(ctx, &datatransfers.VideoUpscalerRequest{
@@ -299,13 +293,14 @@ func (u *App) ProcessVideosFromUpload(filesBase64 []string, filenames []string, 
 			InputFileSize:      fileInfo.Size(),
 			TempFilePath:       tempFilePath,
 			TempDir:            tempDir,
-			Model:              model,
+			Model:              request.Model,
 			SavePath:           savePath,
+			ScaleMultiplier:    request.Scale,
 		})
 		if err != nil {
-			results[filenames[i]] = "Failed: " + err.Error()
+			results[request.FileName] = "Failed: " + err.Error()
 		} else {
-			results[filenames[i]] = "Success: " + savePath
+			results[request.FileName] = "Success: " + savePath
 		}
 	}
 
