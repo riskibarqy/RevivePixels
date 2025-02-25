@@ -78,7 +78,7 @@ func (u *videoUpscalerUsecase) GetVideoMetadata(ctx context.Context, inputPath s
 	denominator, _ := strconv.Atoi(frameRateParts[1])
 	fps := numerator / denominator
 
-	u.logger.Info(fmt.Sprintf("ℹ️ Video has %d frames at %d FPS", nbFrames, fps))
+	u.logger.Info(fmt.Sprintf("ℹ️ Video details : has %d frames at %d FPS", nbFrames, fps))
 
 	return &datatransfers.FFProbeStreamsMetadataResponse{
 		TotalFrames: nbFrames,
@@ -200,7 +200,7 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 				"-t", "0", /* tile size (>=32/0=auto, default=0) can be 0,0,0 for multi-gpu */
 				"-n", params.Model,
 				"-g", "0", /* gpu device to use (default=auto) can be 0,1,2 for multi-gpu */
-				"-j", "2:2:2", /* thread count for load/proc/save (default=1:2:2) can be 1:2,2,2:2 for multi-gpu */
+				"-j", "4:4:4", /* thread count for load/proc/save (default=1:2:2) can be 1:2,2,2:2 for multi-gpu */
 				" --fp16",
 			)
 
@@ -318,7 +318,6 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	params.LoadingProgress += 5
 	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 5% - Initial setup done
 
-	u.logger.Info("Getting video details")
 	// Get total frames and FPS
 	videoMetaData, err := u.GetVideoMetadata(ctx, params.TempFilePath)
 	if err != nil {
@@ -405,13 +404,13 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 		estimatedRemainingTime := time.Duration(avgTimePerFrame * float64(remainingFrames) * float64(time.Second))
 
 		batchElapsed := time.Since(batchStartTime).Seconds()
-		u.logger.Info(fmt.Sprintf("🔄 Batch %d/%d completed in %.2fs. ETA: %s", (i/batchSize)+1, (totalFrames/batchSize)+1, batchElapsed, estimatedRemainingTime.Round(time.Second)))
+		u.logger.Info(fmt.Sprintf("🔄 Batch %d/%d completed in %.2fs. Estimated time remaining: %s", (i/batchSize)+1, (totalFrames/batchSize)+1, batchElapsed, estimatedRemainingTime.Round(time.Second)))
 	}
 
 	params.LoadingProgress += 5
 	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 85% - Finished processing all batches
 
-	u.logger.Info("Merging video")
+	u.logger.Info("⚙️ Merging video")
 	// Merge all batch videos into the final video
 	if err := u.MergeVideos(ctx, tempVideos, params); err != nil {
 		return fmt.Errorf("error merging final video: %v", err)
@@ -420,8 +419,7 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	params.LoadingProgress += 5
 	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 95% - Merging done, starting cleanup
 
-	u.logger.Info("Cleaning temp files")
-	u.logger.Info("Cleaning " + params.TempDir)
+	u.logger.Info("🧹 Cleaning temporary files")
 
 	// Cleanup temp batch videos
 	os.RemoveAll(params.TempDir)
@@ -429,7 +427,7 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	params.LoadingProgress += 5
 	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 100% - Process complete
 	totalElapsed := time.Since(startTime).Seconds()
-	u.logger.Info(fmt.Sprintf("✅ Upscaling completed successfully in %dm%.2fs!", int(totalElapsed/60), totalElapsed))
+	u.logger.Info(fmt.Sprintf("✅ Upscaling completed! Took: %dm%.2fs! 📊 Frames: %d | FPS: %d | Model: %s", int(totalElapsed/60), totalElapsed, videoMetaData.FPS, videoMetaData.TotalFrames, params.Model))
 
 	return nil
 }

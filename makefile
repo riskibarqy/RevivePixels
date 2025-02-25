@@ -18,3 +18,6 @@ release:
 
 build-windows:
 	@wails build -platform windows/amd64 --clean
+
+clean-go-temp:
+	@go clean -modcache -cache -testcache

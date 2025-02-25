@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -26,7 +28,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
@@ -171,14 +173,14 @@ func (u *App) onSecondInstanceLaunch(secondInstanceData options.SecondInstanceDa
 
 	println("user opened second instance", strings.Join(secondInstanceData.Args, ","))
 	println("user opened second from", secondInstanceData.WorkingDirectory)
-	runtime.WindowUnminimise(u.ctx)
-	runtime.Show(u.ctx)
-	go runtime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
+	wailsRuntime.WindowUnminimise(u.ctx)
+	wailsRuntime.Show(u.ctx)
+	go wailsRuntime.EventsEmit(u.ctx, "launchArgs", secondInstanceArgs)
 }
 
 func (u *App) beforeClose(ctx context.Context) (prevent bool) {
-	dialog, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
-		Type:    runtime.QuestionDialog,
+	dialog, err := wailsRuntime.MessageDialog(ctx, wailsRuntime.MessageDialogOptions{
+		Type:    wailsRuntime.QuestionDialog,
 		Title:   "Quit?",
 		Message: "Are you sure you want to quit?",
 	})
@@ -233,7 +235,7 @@ func (u *App) startup(ctx context.Context) {
 		for scanner.Scan() {
 			logMsg := strings.TrimSpace(scanner.Text())
 			if logMsg != "" {
-				runtime.EventsEmit(ctx, "stderr_log", logMsg)
+				wailsRuntime.EventsEmit(ctx, "stderr_log", logMsg)
 			}
 		}
 	}()
@@ -264,7 +266,7 @@ func (u *App) ProcessVideosFromUpload(requests []*datatransfers.InputFileRequest
 
 		tempDir, err := os.MkdirTemp(rootTempDir, fmt.Sprintf("%d", i))
 		if err != nil {
-			runtime.LogError(ctx, fmt.Sprintf("failed create temp dir : %v", err))
+			wailsRuntime.LogError(ctx, fmt.Sprintf("failed create temp dir : %v", err))
 			continue
 		}
 
@@ -326,6 +328,34 @@ func (u *App) CleanupRootTempFolder() {
 	if err != nil {
 		logger.Error(err.Error())
 	}
+}
+
+func (a *App) OpenOutputFolder() error {
+	outputFolder, err := utils.GetOutputVideoFolder()
+	if err != nil {
+		return err
+	}
+
+	// Open folder based on OS
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", outputFolder)
+		// only support windows for now
+	// case "darwin": // macOS
+	// 	cmd = exec.Command("open", outputFolder)
+	// case "linux":
+	// 	cmd = exec.Command("xdg-open", outputFolder)
+	default:
+		return nil // Unsupported OS
+	}
+
+	return cmd.Start()
+}
+
+func (a *App) ShutdownComputer() error {
+	cmd := exec.Command("shutdown", "/s", "/t", "0")
+	return cmd.Run()
 }
 
 func (u *App) gracefulShutdown() {
