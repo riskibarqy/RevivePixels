@@ -12,24 +12,21 @@ const UPSCALE_MODELS = [
     { name: "realesrgan-x4plus", scales: [4] },
     { name: "realesrnet-x4plus", scales: [4] },
     { name: "realesrgan-x4plus-anime", scales: [4] },
-    { name: "realesr-animevideov3", scales: [2, 3, 4] }, // This one supports multiple scales
+    { name: "realesr-animevideov3", scales: [2, 3, 4] },
 ];
-
 
 function App() {
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
     const [status, setStatus] = useState({});
-    const [selectedModel, setSelectedModel] = useState("realesrgan-x4plus");
-    const [selectedScale, setSelectedScale] = useState(4);
     const [logs, setLogs] = useState<string[]>([]);
     const [processing, setProcessing] = useState(false);
     const [elapsedTime, setElapsedTime] = useState(0);
     const [progressMap, setProgressMap] = useState({});
     const logContainerRef = useRef<HTMLDivElement | null>(null);
     const startTimeRef = useRef<number | null>(null);
-    const [thumbnails, setThumbnails] = useState({}); // Store thumbnails per file
-
-    const timer = useRef<number | null>(null); // Allows storing a number
+    const [thumbnails, setThumbnails] = useState({});
+    const [fileSettings, setFileSettings] = useState({});
+    const timer = useRef<number | null>(null);
 
     useEffect(() => {
         if (processing) {
@@ -42,8 +39,6 @@ function App() {
             }
         }
     }, [processing]);
-
-
 
     // capture logs 
     useEffect(() => {
@@ -99,12 +94,17 @@ function App() {
 
         acceptedFiles.forEach((file) => {
             generateThumbnail(file);
+            setFileSettings((prev) => ({
+                ...prev,
+                [file.name]: prev[file.name] || { model: "realesrgan-x4plus", scale: 4 },
+            }));
         });
     }, []);
 
     // reactDropZone
     const { getRootProps, getInputProps } = useDropzone({
         accept: { "video/*": [] },
+        disabled: processing,
         onDrop,
     });
 
@@ -180,8 +180,8 @@ function App() {
                 FileCode: "", // Assign a value if required
                 FileBase64: filesBase64[index],
                 FileName: file.name,
-                Model: selectedModel,
-                Scale: selectedScale, // Assign the appropriate scale
+                Model: fileSettings[file.name]?.model,
+                Scale: fileSettings[file.name]?.scale, 
             }));
 
             const result = await ProcessVideosFromUpload(inputFiles);
@@ -191,6 +191,7 @@ function App() {
             setLogs((prevLogs) => [...prevLogs, error.name === "AbortError" ? "Processing was canceled." : `Error: ${error.message}`]);
         }
         setProcessing(false);
+        setProgressMap({})
     };
 
     const discardFile = (file) => {
@@ -206,122 +207,136 @@ function App() {
         setProgressMap({})
     };
 
+    const handleModelChange = (fileName, model) => {
+        setFileSettings((prev) => {
+            const newScale = UPSCALE_MODELS.find((m) => m.name === model)?.scales[0] || 4; // Ensure we select the first valid scale
+            return {
+                ...prev,
+                [fileName]: {
+                    ...prev[fileName],
+                    model,
+                    scale: newScale, // Update the scale to match the new model
+                },
+            };
+        });
+    };
+
+    const handleScaleChange = (fileName, scale) => {
+        setFileSettings((prev) => ({
+            ...prev,
+            [fileName]: {
+                ...prev[fileName],
+                scale,
+            },
+        }));
+    };
+
     return (
 
-        <div className="grid grid-cols-4 md:grid-cols-5 grid-rows-5 h-screen w-screen overflow-hidden">
-            {/* Drop Files */}
-            <div className="col-span-4 flex flex-col items-center justify-center p-3">
-                <div {...getRootProps()}
-                    className="p-6 text-center cursor-pointer hover:bg-opacity-50 border-2 border-dashed border-gray-500 rounded-lg w-full h-48 flex items-center justify-center">
-                    <input {...getInputProps()} />
-                    <p className="text-lg flex items-center justify-center gap-2">
+        <div className="grid grid-cols-5 grid-rows-5 gap-4 h-screen w-screen overflow-hidden">
+            <div className="col-span-5 p-2">
+                <div
+                    {...getRootProps()}
+                    className={`text-center cursor-pointer border-2 border-dashed border-gray-500 rounded-lg w-full h-36 flex items-center justify-center 
+        ${processing ? "opacity-50 cursor-not-allowed" : "hover:bg-opacity-50"}`}
+                >
+                    <input {...getInputProps()} disabled={processing} />
+                    <p className="text-lg flex gap-2">
                         📂 Drag & drop videos here, or click to select
                     </p>
                 </div>
             </div>
 
-            {/* Terminal Logs */}
+            <div className="col-span-5 row-span-3 row-start-2">
+                {/* File List */}
+                <div className="col-span-4 row-span-3 col-start-1 row-start-2 overflow-y-auto h-full p-3 bg-gray-800 rounded-md">
+                    {selectedFiles.length > 0 ? (
+                        <ul className="list-none text-white">
+                            {selectedFiles.map((file) => (
+                                <div className="relative" key={file.name} >
+                                    {/* Progress Bar - Positioned on top of the list */}
+                                    <div className={`absolute top-0 left-0 w-full ${processing ? "z-10 cursor-not-allowed" : "z-0"}`}>
+                                        <ProgressBar
+                                            completed={progressMap[file.name] || 0}
+                                            bgColor="rgba(255,0,0,0.1)"
+                                            baseBgColor="rgba(0,0,0,0)"
+                                            borderRadius="5px"
+                                            height="80px"
+                                            isLabelVisible={false}
+                                        />
+                                    </div>
+                                    <li className="flex items-center gap-3 p-2 bg-gray-700 rounded-md mb-2">
+                                        {/* Thumbnail */}
+                                        {thumbnails[file.name] && (
+                                            <img src={thumbnails[file.name]} alt="Thumbnail" className="w-16 h-16 object-cover rounded-md" />
+                                        )}
+
+                                        {/* File Info */}
+                                        <div className="flex-1 overflow-hidden">
+                                            <span className="text-white block truncate">{file.name}</span>
+                                            <span className="text-sm text-gray-400">{(file.size / (1024 * 1024)).toFixed(2) + " MB "}</span>
+                                        </div>
+
+                                        <div className={`flex-1 overflow-hidden ${processing ? "z-0" : "z-10"}`}>
+                                            <div className="mt-2">
+                                                <select
+                                                    value={fileSettings[file.name]?.model || "realesrgan-x4plus"}
+                                                    onChange={(e) => handleModelChange(file.name, e.target.value)}
+                                                    className="bg-gray-700 text-white p-1 rounded-md"
+                                                >
+                                                    {UPSCALE_MODELS.map((model) => (
+                                                        <option key={model.name} value={model.name}>{model.name}</option>
+                                                    ))}
+                                                </select>
+
+                                                <select
+                                                    value={fileSettings[file.name]?.scale || 4}
+                                                    onChange={(e) => handleScaleChange(file.name, Number(e.target.value))}
+                                                    className="ml-2 bg-gray-700 text-white p-1 rounded-md"
+                                                >
+                                                    {UPSCALE_MODELS.find((m) => m.name === fileSettings[file.name]?.model)?.scales.map((scale) => (
+                                                        <option key={scale} value={scale}>{`x${scale}`}</option>
+                                                    ))}
+                                                </select>
+
+                                            </div>
+                                        </div>
+
+                                        {/* Remove Button */}
+                                        <button
+                                            className={` ${processing ? "z-0" : "z-10"}`}
+                                            onClick={() => discardFile(file)}
+                                        >
+                                            ❌
+                                        </button>
+                                    </li>
+                                </div>
+                            ))}
+                        </ul>
+                    ) : (
+                        <div>
+                            <p className="text-gray-400 text-center">No files selected.</p>
+                        </div>
+                    )}
+                </div>
+            </div>
             <div ref={logContainerRef} className="col-span-4 row-start-5 min-h-full bg-black rounded-md overflow-auto text-green-400 mb-1 ml-1 mr-1 p-3">
+                {/* Terminal Logs */}
                 <h2 className="text-lg font-semibold text-white">Terminal Logs:</h2>
                 <pre className="text-sm whitespace-pre-wrap">{logs.join("\n")}</pre>
             </div>
-
-            {/* Upscale Model Selector */}
-            {/* Upscale Model Selector */}
-            <div className="row-span-2 col-start-5 row-start-1 flex flex-col p-3">
-                <label className="text-lg">Upscale Model:</label>
-                <select
-                    value={selectedModel}
-                    onChange={(e) => {
-                        const model = e.target.value;
-                        setSelectedModel(model);
-
-                        // Reset scale if the new model doesn't support the current scale
-                        const modelData = UPSCALE_MODELS.find((m) => m.name === model);
-                        if (modelData && !modelData.scales.includes(selectedScale)) {
-                            setSelectedScale(modelData.scales[0]); // Set to the first available scale
-                        }
-                    }}
-                    className="mt-2 bg-gray-700 text-white p-2 rounded-lg"
-                >
-                    {UPSCALE_MODELS.map((model) => (
-                        <option key={model.name} value={model.name}>{model.name}</option>
-                    ))}
-                </select>
-            </div>
-
-            {/* Scale Selector */}
-            <div className="row-span-2 col-start-5 row-start-2 flex flex-col p-3">
-                <label className="text-lg">Scale:</label>
-                <select
-                    value={selectedScale}
-                    onChange={(e) => setSelectedScale(Number(e.target.value))}
-                    className="mt-2 bg-gray-700 text-white p-2 rounded-lg"
-                >
-                    {UPSCALE_MODELS.find((m) => m.name === selectedModel)?.scales.map((scale) => (
-                        <option key={scale} value={scale}>{`x${scale}`}</option>
-                    ))}
-                </select>
-            </div>
-
-
-            {/* File List */}
-            <div className="col-span-4 row-span-3 col-start-1 row-start-2 overflow-y-auto h-full p-3 bg-gray-800 rounded-md">
-                {selectedFiles.length > 0 ? (
-                    <ul className="list-none text-white">
-                        {selectedFiles.map((file) => (
-                            <div className="relative">
-                                {/* Progress Bar - Positioned on top of the list */}
-                                <div className="absolute top-0 left-0 w-full z-10">
-                                    <ProgressBar
-                                        completed={progressMap[file.name] || 0}
-                                        bgColor="rgba(255,0,0,0.1)"
-                                        baseBgColor="rgba(0,0,0,0)"
-                                        borderRadius="5px"
-                                        height="80px"
-                                        isLabelVisible={false}
-                                    />
-                                </div>
-                                <li key={file.name} className="flex items-center gap-3 p-2 bg-gray-700 rounded-md mb-2">
-                                    {/* Thumbnail */}
-                                    {thumbnails[file.name] && (
-                                        <img src={thumbnails[file.name]} alt="Thumbnail" className="w-16 h-16 object-cover rounded-md" />
-                                    )}
-
-                                    {/* File Info */}
-                                    <div className="flex-1 overflow-hidden">
-                                        <span className="text-white block truncate">{file.name}</span>
-                                        <span className="text-sm text-gray-400">{(file.size / (1024 * 1024)).toFixed(2) + " MB "}</span>
-                                    </div>
-
-                                    {/* Remove Button */}
-                                    <button
-                                        className="text-red-600 hover:text-red-800 z-20"
-                                        onClick={() => discardFile(file)}
-                                    >
-                                        ❌
-                                    </button>
-                                </li>
-                            </div>
-                        ))}
-                    </ul>
-                ) : (
-                    <div>
-                        <p className="text-gray-400 text-center">No files selected.</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Buttons */}
-            <div className="col-start-5 row-start-5 flex flex-col place-self-stretch">
-                <Button onClick={handleUpscale} disabled={processing} className="w-full p-4 rounded-none">
-                    {processing ? <Loader2 className="animate-spin" /> : "Upscale Videos"} {processing && `(${elapsedTime}s)`}
-                </Button>
-                {processing && (
-                    <Button onClick={handleCancel} variant="destructive" className="w-full flex items-center justify-center gap-2 rounded-none">
-                        <XCircle size={20} /> Cancel
+            <div className="col-start-5 row-start-5">
+                {/* Buttons */}
+                <div className="col-start-5 row-start-5 flex flex-col place-self-stretch">
+                    <Button onClick={handleUpscale} disabled={processing} className="w-full p-4 rounded-none">
+                        {processing ? <Loader2 className="animate-spin" /> : "Upscale Videos"} {processing && `(${elapsedTime}s)`}
                     </Button>
-                )}
+                    {processing && (
+                        <Button onClick={handleCancel} variant="destructive" className="w-full flex items-center justify-center gap-2 rounded-none">
+                            <XCircle size={20} /> Cancel
+                        </Button>
+                    )}
+                </div>
             </div>
         </div>
 

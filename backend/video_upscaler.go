@@ -200,8 +200,8 @@ func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []strin
 				"-t", "0", /* tile size (>=32/0=auto, default=0) can be 0,0,0 for multi-gpu */
 				"-n", params.Model,
 				"-g", "0", /* gpu device to use (default=auto) can be 0,1,2 for multi-gpu */
-				// "-j", "16:16:16", /* thread count for load/proc/save (default=1:2:2) can be 1:2,2,2:2 for multi-gpu */
-				// " --fp16",
+				"-j", "2:2:2", /* thread count for load/proc/save (default=1:2:2) can be 1:2,2,2:2 for multi-gpu */
+				" --fp16",
 			)
 
 			if err := runCommand(cmd); err != nil {
