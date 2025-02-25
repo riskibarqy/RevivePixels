@@ -287,6 +287,11 @@ func (u *App) ProcessVideosFromUpload(requests []*datatransfers.InputFileRequest
 
 		savePath := filepath.Join(outputFolder, fmt.Sprintf("%d_upscaled_", utils.NowUnix())+request.FileName)
 
+		fmt.Println(fileInfo.Name())
+		fmt.Println(strings.TrimSuffix(fileInfo.Name(), filepath.Ext(tempFilePath)))
+		fmt.Println(savePath)
+		fmt.Println(request.FileName)
+
 		// Process video
 		err = u.videoUpscaler.UpscaleVideoWithRealESRGAN(ctx, &datatransfers.VideoUpscalerRequest{
 			InputPlainFileName: strings.TrimSuffix(fileInfo.Name(), filepath.Ext(tempFilePath)),

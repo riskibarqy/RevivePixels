@@ -3,26 +3,18 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { ProcessVideosFromUpload, CancelProcessing, OpenOutputFolder, ShutdownComputer } from "../wailsjs/go/main/App";
 import { EventsOn, EventsOff } from "../wailsjs/runtime/runtime";
-import { color, motion } from "framer-motion";
-import { Loader2, Upload, XCircle } from "lucide-react";
+import { Loader2, XCircle } from "lucide-react";
 import ProgressBar from "@ramonak/react-progress-bar";
 import { datatransfers } from "../wailsjs/go/models";
 import { Button } from "@/components/ui/button";
-import {
-    Select,
-    SelectTrigger,
-    SelectValue,
-    SelectContent,
-    SelectItem
-} from "@/components/ui/select";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeProvider } from "@/components/theme-provider"
 import { ModeToggle } from "@/components/mode-toggle"
 import useAlertDialog from "@/hooks/alert-dialog";
-
-
+import { ScrollArea, ScrollBar  } from "@/components/ui/scroll-area"
 
 const UPSCALE_MODELS = [
     { name: "realesrgan-x4plus", scales: [4] },
@@ -82,7 +74,10 @@ function App() {
     // keep logs tracked
     useEffect(() => {
         if (logContainerRef.current) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+            const viewport = logContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+            if (viewport) {
+                viewport.scrollTop = viewport.scrollHeight;
+            }
         }
     }, [logs]);
 
@@ -105,25 +100,43 @@ function App() {
 
     // onDrop events, callback for file drag and drop
     const onDrop = useCallback((acceptedFiles) => {
-        setSelectedFiles(acceptedFiles);
         setStatus({});
         setProgressMap({});
-
+    
+        const updatedFiles = [...selectedFiles];
+    
         acceptedFiles.forEach((file) => {
-            generateThumbnail(file);
+            const existingCount = updatedFiles.filter(f => f.name.startsWith(file.name.replace(/\.\w+$/, ''))).length;
+            
+            const fileExtension = file.name.substring(file.name.lastIndexOf('.')); // Get the file extension
+            const fileNameWithoutExt = file.name.replace(/\.\w+$/, ''); // Remove the extension
+            
+            const uniqueName = existingCount > 0 
+                ? `${fileNameWithoutExt}-(${existingCount})${fileExtension}` 
+                : file.name;
+    
+            const uniqueFile = new File([file], uniqueName, { type: file.type });
+    
+            updatedFiles.push(uniqueFile);
+            generateThumbnail(uniqueFile);
+    
             setFileSettings((prev) => ({
                 ...prev,
-                [file.name]: prev[file.name] || { model: "realesrgan-x4plus", scale: 4 },
+                [uniqueFile.name]: prev[file.name] || { model: "realesrgan-x4plus", scale: 4 },
             }));
         });
-    }, []);
+    
+        setSelectedFiles(updatedFiles);
+    }, [selectedFiles]);
+    
+    
 
     // reactDropZone
     const { getRootProps, getInputProps } = useDropzone({
-        accept: { "video/*": [] },
+        accept: { "video/mp4": [] },
         disabled: processing,
         onDrop,
-    });
+    });    
 
     // generate video thumbnail
     const generateThumbnail = (file) => {
@@ -168,15 +181,14 @@ function App() {
 
     // upscale video
     const handleUpscale = async () => {
-        setProgressMap({})
         if (selectedFiles.length === 0) {
-            showAlert("Invalid file input", "Please select at least one file")
+            showAlert("Invalid file input", "Please select at least one file");
             return;
         }
-
+    
         setProcessing(true);
         setStatus(Object.fromEntries(selectedFiles.map((file) => [file.name, "Processing..."])));
-
+    
         try {
             const fileDataPromises = selectedFiles.map((file) =>
                 new Promise<string>((resolve, reject) => {
@@ -188,52 +200,45 @@ function App() {
                         } else {
                             reject(new Error("Failed to read file as DataURL"));
                         }
-                    }
+                    };
                     reader.onerror = () => reject(new Error("FileReader encountered an error"));
                 })
             );
-
+    
             const filesBase64 = await Promise.all(fileDataPromises);
             const inputFiles: datatransfers.InputFileRequest[] = selectedFiles.map((file, index) => ({
-                FileCode: "", // Assign a value if required
+                FileCode: "",
                 FileBase64: filesBase64[index],
                 FileName: file.name,
                 Model: fileSettings[file.name]?.model,
                 Scale: fileSettings[file.name]?.scale,
             }));
-
+    
             const result = await ProcessVideosFromUpload(inputFiles);
             setStatus(result);
+    
             setTimeout(() => {
                 setProgressMap({});
             }, 500);
-
+    
         } catch (error) {
             setLogs((prevLogs) => [...prevLogs, error.name === "AbortError" ? "Processing was canceled." : `Error: ${error.message}`]);
         }
+    
         setProcessing(false);
-
-        setTimeout(() => {
-            setShutdownAfterDone((latestShutdown) => {
-                setLogs((prevLogs) => [...prevLogs, "latestShutdown : " + latestShutdown]);
-                if (latestShutdown) {
-                    setLogs((prevLogs) => [...prevLogs, "shutting down computer .."]);
-                    ShutdownComputer();
-                }
-                return latestShutdown;
-            });
-        }, 100);
     };
+    
 
     // clear video
-    const discardFile = (file) => {
-        setSelectedFiles(selectedFiles.filter(f => f.name !== file.name)); // Remove the discarded file from the list
+    const discardFile = (fileToRemove) => {
+        setSelectedFiles((prevFiles) => prevFiles.filter((f) => f !== fileToRemove));
+    
         setProgressMap((prev) => {
             const newProgress = { ...prev };
-            delete newProgress[file.name]; // Remove progress entry for this file
+            delete newProgress[fileToRemove.name];
             return newProgress;
         });
-    };
+    };    
 
     // cancel process
     const handleCancel = () => {
@@ -305,101 +310,103 @@ function App() {
                 <div className="col-span-5 row-span-3 row-start-2">
                     {/* File List */}
                     <div className="col-span-4 row-span-3 col-start-1 row-start-2 overflow-y-auto h-full p-3 rounded-md">
-                        {selectedFiles.length > 0 ? (
-                            <ul className="list-none">
-                                {selectedFiles.map((file) => (
-                                    <div className="relative" key={file.name} >
-                                        {/* Progress Bar - Positioned on top of the list */}
-                                        <div className={`absolute top-0 left-0 w-full h-full ${processing ? "z-10 cursor-not-allowed" : "z-0"}`}>
-                                            <ProgressBar
-                                                completed={progressMap[file.name] || 0}
-                                                bgColor="rgba(255,255,255,0.1)"
-                                                baseBgColor="rgba(0,0,0,0)"
-                                                borderRadius="5px"
-                                                height="90px"
-                                                isLabelVisible={false}
-                                            />
-                                        </div>
-                                        <li className="flex items-center gap-4 p-3 rounded-lg shadow-md mb-2 border border-gray-600">
-                                            {/* Thumbnail */}
-                                            {thumbnails[file.name] && (
-                                                <img
-                                                    src={thumbnails[file.name]}
-                                                    alt="Thumbnail"
-                                                    className="w-16 h-16 object-cover rounded-md border border-gray-700"
+                        <ScrollArea className="h-full pr-3">
+                            {selectedFiles.length > 0 ? (
+                                <ul className="list-none">
+                                    {selectedFiles.map((file) => (
+                                        <div className="relative" key={file.name} >
+                                            {/* Progress Bar - Positioned on top of the list */}
+                                            <div className={`absolute top-0 left-0 w-full h-full ${processing ? "z-10 cursor-not-allowed" : "z-0"}`}>
+                                                <ProgressBar
+                                                    completed={progressMap[file.name] || 0}
+                                                    bgColor="rgba(255,255,255,0.1)"
+                                                    baseBgColor="rgba(0,0,0,0)"
+                                                    borderRadius="5px"
+                                                    height="90px"
+                                                    isLabelVisible={false}
                                                 />
-                                            )}
-
-                                            {/* File Info */}
-                                            <div className="flex-1 overflow-hidden">
-                                                <span className="block font-semibold truncate">{file.name}</span>
-                                                <span className="text-sm">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
                                             </div>
+                                            <li className="flex items-center gap-4 p-3 rounded-lg shadow-md mb-2 border border-gray-600">
+                                                {/* Thumbnail */}
+                                                {thumbnails[file.name] && (
+                                                    <img
+                                                        src={thumbnails[file.name]}
+                                                        alt="Thumbnail"
+                                                        className="w-16 h-16 object-cover rounded-md border border-gray-700"
+                                                    />
+                                                )}
 
-                                            {/* Model & Scale Dropdowns */}
-                                            <div className={`flex items-center gap-2 ${processing ? "z-0" : "z-10"}`}>
-                                                <TooltipProvider>
-                                                    <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                            <Select
-                                                                value={fileSettings[file.name]?.model || "realesrgan-x4plus"}
-                                                                onValueChange={(value) => handleModelChange(file.name, value)}
-                                                            >
-                                                                <SelectTrigger className="px-2 py-1 rounded-md border">
-                                                                    <SelectValue placeholder="Select a model" />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    {UPSCALE_MODELS.map((model) => (
-                                                                        <SelectItem key={model.name} value={model.name}>
-                                                                            {model.name}
-                                                                        </SelectItem>
-                                                                    ))}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            {fileSettings[file.name]?.model || "realesrgan-x4plus"}
-                                                        </TooltipContent>
-                                                    </Tooltip>
-                                                </TooltipProvider>
+                                                {/* File Info */}
+                                                <div className="flex-1 overflow-hidden">
+                                                    <span className="block font-semibold truncate">{file.name}</span>
+                                                    <span className="text-sm">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                                                </div>
+
+                                                {/* Model & Scale Dropdowns */}
+                                                <div className={`flex items-center gap-2 ${processing ? "z-0" : "z-10"}`}>
+                                                    <TooltipProvider>
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <Select
+                                                                    value={fileSettings[file.name]?.model || "realesrgan-x4plus"}
+                                                                    onValueChange={(value) => handleModelChange(file.name, value)}
+                                                                >
+                                                                    <SelectTrigger className="px-2 py-1 rounded-md border">
+                                                                        <SelectValue placeholder="Select a model" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {UPSCALE_MODELS.map((model) => (
+                                                                            <SelectItem key={model.name} value={model.name}>
+                                                                                {model.name}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>
+                                                                {fileSettings[file.name]?.model || "realesrgan-x4plus"}
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                    </TooltipProvider>
 
 
-                                                <Select
-                                                    value={String(fileSettings[file.name]?.scale || 4)}
-                                                    onValueChange={(value) => handleScaleChange(file.name, Number(value))}
+                                                    <Select
+                                                        value={String(fileSettings[file.name]?.scale || 4)}
+                                                        onValueChange={(value) => handleScaleChange(file.name, Number(value))}
+                                                    >
+                                                        <SelectTrigger className="px-2 py-1 rounded-md border">
+                                                            <SelectValue placeholder="Select a scale" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {UPSCALE_MODELS.find((m) => m.name === fileSettings[file.name]?.model)?.scales.map((scale) => (
+                                                                <SelectItem key={scale} value={String(scale)}>
+                                                                    {`x${scale}`}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+
+                                                </div>
+
+                                                {/* Remove Button */}
+                                                <Button
+                                                    className={`font-bold ${processing ? "z-0" : "z-10"}`}
+                                                    onClick={() => discardFile(file)}
+                                                    variant="destructive"
                                                 >
-                                                    <SelectTrigger className="px-2 py-1 rounded-md border">
-                                                        <SelectValue placeholder="Select a scale" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {UPSCALE_MODELS.find((m) => m.name === fileSettings[file.name]?.model)?.scales.map((scale) => (
-                                                            <SelectItem key={scale} value={String(scale)}>
-                                                                {`x${scale}`}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                    X
+                                                </Button>
+                                            </li>
 
-                                            </div>
-
-                                            {/* Remove Button */}
-                                            <Button
-                                                className={`font-bold ${processing ? "z-0" : "z-10"}`}
-                                                onClick={() => discardFile(file)}
-                                                variant="destructive"
-                                            >
-                                                X
-                                            </Button>
-                                        </li>
-
-                                    </div>
-                                ))}
-                            </ul>
-                        ) : (
-                            <div>
-                                <p className="text-gray-400 text-center">No files selected.</p>
-                            </div>
-                        )}
+                                        </div>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <div>
+                                    <p className="text-gray-400 text-center">No files selected.</p>
+                                </div>
+                            )}
+                        </ScrollArea>
                     </div>
                 </div>
                 <div className="col-span-4 row-start-5 flex flex-col rounded-lg shadow-lg border">
@@ -423,14 +430,16 @@ function App() {
                         </TooltipProvider>
                     </div>
 
-                    <div
+                    <ScrollArea ref={logContainerRef} className="p-4 text-xs font-mono overflow-auto max-h-64 break-words rounded-b-lg">
+                        {/* <div
                         ref={logContainerRef}
-                        className="p-4 text-xs font-mono overflow-auto max-h-64 custom-scroll break-words rounded-b-lg"
-                    >
+                        className=""
+                    > */}
                         <pre className="whitespace-pre-wrap overflow-wrap break-words">
                             {logs.join("\n") || "No logs yet..."}
                         </pre>
-                    </div>
+                        {/* </div> */}
+                    </ScrollArea>
                 </div>
 
                 {/* Button Section */}
@@ -457,7 +466,6 @@ function App() {
                                 </TooltipTrigger>
                                 <TooltipContent>Clear List</TooltipContent>
                             </Tooltip>
-
                             <ModeToggle />
                         </TooltipProvider>
                     </div>
