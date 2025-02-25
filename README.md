@@ -1,3 +1,4 @@
+
 # RevivePixels
 
 **RevivePixels** is a Windows-only video upscaling application built with **Wails**, **Golang**, and **React** (using **TailwindCSS**). It utilizes **Real-ESRGAN NCNN Vulkan** for AI-based upscaling and **FFmpeg** for video processing, both of which are embedded within the application.
@@ -16,18 +17,6 @@
 - **High CPU & GPU usage** – The upscaling process is computationally intensive and may fully utilize your CPU and GPU.  
 - **High RAM consumption** – Depending on the video resolution and upscaling settings, the app may require a significant amount of memory.  
 - **Recommended hardware**: A modern NVIDIA GPU with Vulkan support and at least 16GB of RAM for smooth performance.  
-
-## ⏱ Performance Benchmarks  
-
-+---------------------------------------------+--------------+----------------------+-----------------+
-| Hardware                                    | Video Length | Model                | Processing Time |
-+---------------------------------------------+--------------+----------------------+-----------------+
-| RTX 3060 (12GB), 32GB RAM, AMD Ryzen 5 3600 | 7 sec        | realesr-animevideov3 | ~120 sec        |
-+---------------------------------------------+--------------+----------------------+-----------------+
-|                                             |              |                      |                 |
-+---------------------------------------------+--------------+----------------------+-----------------+
-|                                             |              |                      |                 |
-+---------------------------------------------+--------------+----------------------+-----------------+
 
 *Processing time may vary based on resolution, model, and system load.*
 
