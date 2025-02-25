@@ -165,8 +165,8 @@ func (u *videoUpscalerUsecase) hasAudioStream(ctx context.Context, videoPath str
 // UpscaleFrames processes multiple frames in parallel using Real-ESRGAN.
 func (u *videoUpscalerUsecase) UpscaleFrames(ctx context.Context, frames []string, frameDir string, params *datatransfers.VideoUpscalerRequest) error {
 	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, runtime.NumCPU()) // Max 4 concurrent processes
-	errChan := make(chan error, len(frames))           // Collect errors
+	semaphore := make(chan struct{}, runtime.NumCPU()/2) // Max concurrent processes
+	errChan := make(chan error, len(frames))             // Collect errors
 
 	var processedFrames int32 = 0 // Track number of completed frames
 	totalFrames := len(frames)
