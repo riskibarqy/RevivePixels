@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeProvider } from "@/components/theme-provider"
 import { ModeToggle } from "@/components/mode-toggle"
 import useAlertDialog from "@/hooks/alert-dialog";
-import { ScrollArea, ScrollBar  } from "@/components/ui/scroll-area"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 const UPSCALE_MODELS = [
     { name: "realesrgan-x4plus", scales: [4] },
@@ -97,46 +97,43 @@ function App() {
         }
     }, [processing]);
 
-
     // onDrop events, callback for file drag and drop
     const onDrop = useCallback((acceptedFiles) => {
         setStatus({});
         setProgressMap({});
-    
+
         const updatedFiles = [...selectedFiles];
-    
+
         acceptedFiles.forEach((file) => {
             const existingCount = updatedFiles.filter(f => f.name.startsWith(file.name.replace(/\.\w+$/, ''))).length;
-            
+
             const fileExtension = file.name.substring(file.name.lastIndexOf('.')); // Get the file extension
             const fileNameWithoutExt = file.name.replace(/\.\w+$/, ''); // Remove the extension
-            
-            const uniqueName = existingCount > 0 
-                ? `${fileNameWithoutExt}-(${existingCount})${fileExtension}` 
+
+            const uniqueName = existingCount > 0
+                ? `${fileNameWithoutExt}-(${existingCount})${fileExtension}`
                 : file.name;
-    
+
             const uniqueFile = new File([file], uniqueName, { type: file.type });
-    
+
             updatedFiles.push(uniqueFile);
             generateThumbnail(uniqueFile);
-    
+
             setFileSettings((prev) => ({
                 ...prev,
                 [uniqueFile.name]: prev[file.name] || { model: "realesrgan-x4plus", scale: 4 },
             }));
         });
-    
+
         setSelectedFiles(updatedFiles);
     }, [selectedFiles]);
-    
-    
 
     // reactDropZone
     const { getRootProps, getInputProps } = useDropzone({
         accept: { "video/mp4": [] },
         disabled: processing,
         onDrop,
-    });    
+    });
 
     // generate video thumbnail
     const generateThumbnail = (file) => {
@@ -185,10 +182,10 @@ function App() {
             showAlert("Invalid file input", "Please select at least one file");
             return;
         }
-    
+
         setProcessing(true);
         setStatus(Object.fromEntries(selectedFiles.map((file) => [file.name, "Processing..."])));
-    
+
         try {
             const fileDataPromises = selectedFiles.map((file) =>
                 new Promise<string>((resolve, reject) => {
@@ -204,7 +201,7 @@ function App() {
                     reader.onerror = () => reject(new Error("FileReader encountered an error"));
                 })
             );
-    
+
             const filesBase64 = await Promise.all(fileDataPromises);
             const inputFiles: datatransfers.InputFileRequest[] = selectedFiles.map((file, index) => ({
                 FileCode: "",
@@ -213,32 +210,41 @@ function App() {
                 Model: fileSettings[file.name]?.model,
                 Scale: fileSettings[file.name]?.scale,
             }));
-    
+
             const result = await ProcessVideosFromUpload(inputFiles);
             setStatus(result);
-    
+
             setTimeout(() => {
                 setProgressMap({});
             }, 500);
-    
+
         } catch (error) {
             setLogs((prevLogs) => [...prevLogs, error.name === "AbortError" ? "Processing was canceled." : `Error: ${error.message}`]);
         }
-    
+
         setProcessing(false);
+
+        setTimeout(() => {
+            setShutdownAfterDone((latestShutdown) => {
+                if (latestShutdown) {
+                    setLogs((prevLogs) => [...prevLogs, "shutting down computer .."]);
+                    ShutdownComputer();
+                }
+                return latestShutdown;
+            });
+        }, 100);
     };
-    
 
     // clear video
     const discardFile = (fileToRemove) => {
         setSelectedFiles((prevFiles) => prevFiles.filter((f) => f !== fileToRemove));
-    
+
         setProgressMap((prev) => {
             const newProgress = { ...prev };
             delete newProgress[fileToRemove.name];
             return newProgress;
         });
-    };    
+    };
 
     // cancel process
     const handleCancel = () => {
@@ -431,14 +437,9 @@ function App() {
                     </div>
 
                     <ScrollArea ref={logContainerRef} className="p-4 text-xs font-mono overflow-auto max-h-64 break-words rounded-b-lg">
-                        {/* <div
-                        ref={logContainerRef}
-                        className=""
-                    > */}
                         <pre className="whitespace-pre-wrap overflow-wrap break-words">
                             {logs.join("\n") || "No logs yet..."}
                         </pre>
-                        {/* </div> */}
                     </ScrollArea>
                 </div>
 
