@@ -20,6 +20,24 @@
 
 *Processing time may vary based on resolution, model, and system load.*
 
+## Benchmarking
+I use RTX 3060 (12GB), 32GB RAM, AMD Ryzen 5 3600, with video length 5 seconds, using different model 
++-------------------------+-------+----------------+------------+
+| Model                   | Scale | FrameTotal/FPS | Time Taken |
++-------------------------+-------+----------------+------------+
+| realesr-animevideov3    | 2x    | 157/29         | 1m81.66s   |
++-------------------------+-------+----------------+------------+
+| realesr-animevideov3    | 3x    | 157/29         | 1m81.15s   |
++-------------------------+-------+----------------+------------+
+| realesr-animevideov3    | 4x    | 157/29         | 1m80.40s   |
++-------------------------+-------+----------------+------------+
+| realesrgan-x4plus       | 4x    | 157/29         | 3m203.70s  |
++-------------------------+-------+----------------+------------+
+| realesrnet-x4plus       | 4x    | 157/29         | 3m213.48s  |
++-------------------------+-------+----------------+------------+
+| realesrgan-x4plus-anime | 4x    | 157/29         | 1m108.42s  |
++-------------------------+-------+----------------+------------+
+
 ## Installation & Usage
 
 1. Download the latest release from the [Releases](https://github.com/riskibarqy/RevivePixels/releases) page.
