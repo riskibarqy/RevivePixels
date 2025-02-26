@@ -1,7 +1,6 @@
 package backend
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -37,7 +36,7 @@ type VideoUpscalerUsecase interface {
 
 type videoUpscalerUsecase struct {
 	logger      *utils.CustomLogger
-	sessionApps *sync.Map // Store sessionApps reference
+	sessionApps *sync.Map
 }
 
 func NewVideoUpscaler(logger *utils.CustomLogger, sessionApps *sync.Map) VideoUpscalerUsecase {
@@ -90,20 +89,17 @@ func (u *videoUpscalerUsecase) GetVideoMetadata(ctx context.Context, inputPath s
 
 // ExtractVideoFrames extracts a batch of frames from the video to reduce memory usage
 func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir, videoPath string, startFrame, frameCount, scaleMultiplier int, videoMetadata *datatransfers.FFProbeStreamsMetadataResponse) error {
-	// If either dimension is below 360, do not rescale
-	if videoMetadata.Width < 360 || videoMetadata.Height < 360 {
-		scaleMultiplier = 1 // No scaling
+	var actualScaleMultiplier int
+
+	if videoMetadata.Width <= 360 || videoMetadata.Height <= 360 {
+		actualScaleMultiplier = 1
 	} else {
-		// Ensure scale is ≤ 2 by dividing iteratively
-		for scaleMultiplier > 2 {
-			scaleMultiplier /= 2
-		}
+		actualScaleMultiplier = 2
 	}
 
-	// Construct scale filter only if needed
-	scaleFilter := ""
-	if scaleMultiplier > 1 {
-		scaleFilter = fmt.Sprintf("scale='if(gt(iw,360),iw/%d,iw)':'if(gt(ih,360),ih/%d,ih)':force_original_aspect_ratio=decrease", scaleMultiplier, scaleMultiplier)
+	var scaleFilter string
+	if actualScaleMultiplier > 1 {
+		scaleFilter = fmt.Sprintf("scale='if(gt(iw,360),iw/%d,iw)':'if(gt(ih,360),ih/%d,ih)':force_original_aspect_ratio=decrease", actualScaleMultiplier, actualScaleMultiplier)
 	}
 
 	outputPattern := filepath.Join(frameDir, "frame_%04d.png")
@@ -119,15 +115,11 @@ func (u *videoUpscalerUsecase) ExtractVideoFrames(ctx context.Context, frameDir,
 		"-fps_mode", "vfr",
 		outputPattern,
 	}
-	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath, cmdArgs...)
 
-	// Capture error output
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	cmd := exec.CommandContext(ctx, config.Paths.FFmpegPath, cmdArgs...)
 
 	err := runCommand(cmd)
 	if err != nil {
-		u.logger.Error(stderr.String())
 		return fmt.Errorf("error extracting frames: %v", err)
 	}
 
@@ -297,7 +289,7 @@ func (u *videoUpscalerUsecase) MergeVideos(ctx context.Context, videoPaths []str
 	return runCommand(cmd)
 }
 
-// ✅ Upscaling function using Real-ESRGAN with batch processing
+// UpscaleVideoWithRealESRGAN Upscaling function using Real-ESRGAN with batch processing
 func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, params *datatransfers.VideoUpscalerRequest) error {
 	startTime := time.Now() // Track overall process start time
 	params.LoadingProgress = 0
@@ -427,7 +419,7 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	params.LoadingProgress += 5
 	u.logger.Trace(fmt.Sprintf("Loading-%d - %s", params.LoadingProgress, params.InputFullFileName)) // ✅ 100% - Process complete
 	totalElapsed := time.Since(startTime).Seconds()
-	u.logger.Info(fmt.Sprintf("✅ Upscaling completed! Took: %dm%.2fs! 📊 Frames: %d | FPS: %d | Model: %s", int(totalElapsed/60), totalElapsed, videoMetaData.FPS, videoMetaData.TotalFrames, params.Model))
+	u.logger.Info(fmt.Sprintf("✅ Upscaling completed! Took: %dm%.2fs! 📊 Frames: %d | FPS: %d | Model: %s | Scale: %dx | video height: %d | video width: %d", int(totalElapsed/60), totalElapsed, videoMetaData.FPS, videoMetaData.TotalFrames, params.Model, params.ScaleMultiplier, videoMetaData.Height, videoMetaData.Width))
 
 	return nil
 }
