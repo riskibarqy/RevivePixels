@@ -370,6 +370,11 @@ func (u *App) gracefulShutdown() {
 	}()
 }
 
+// GetVideoInfo returns detailed information about a video file
+func (u *App) GetVideoInfo(fileData string) (*datatransfers.VideoInfoResponse, error) {
+	return u.videoUpscaler.GetVideoInfo(u.ctx, fileData)
+}
+
 func main() {
 	var err error
 

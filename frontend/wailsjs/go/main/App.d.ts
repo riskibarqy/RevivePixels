@@ -10,6 +10,8 @@ export function ExtractFFmpeg():Promise<void>;
 
 export function ExtractRealEsrgan():Promise<void>;
 
+export function GetVideoInfo(arg1:string):Promise<datatransfers.VideoInfoResponse>;
+
 export function OpenOutputFolder():Promise<void>;
 
 export function ProcessVideosFromUpload(arg1:Array<datatransfers.InputFileRequest>):Promise<{[key: string]: string}>;

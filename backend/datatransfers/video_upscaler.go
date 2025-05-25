@@ -33,3 +33,18 @@ type FFProbeStreamsMetadataResponse struct {
 	Height      int
 	Width       int
 }
+
+type VideoInfoRequest struct {
+	FileData string `json:"fileData"` // base64 encoded file data
+}
+
+type VideoInfoResponse struct {
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	Bitrate     int     `json:"bitrate"`
+	Codec       string  `json:"codec"`
+	Format      string  `json:"format"`
+	FrameRate   float64 `json:"frameRate"`
+	Duration    float64 `json:"duration"`
+	TotalFrames int     `json:"totalFrames"`
+}

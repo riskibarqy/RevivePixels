@@ -10,6 +10,7 @@ import { RescalingSection } from "@/components/RescalingSection";
 
 function App() {
     const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+    const [rescalingFiles, setRescalingFiles] = useState<File[]>([]);
     const [status, setStatus] = useState({});
     const [logs, setLogs] = useState<string[]>([]);
     const [processing, setProcessing] = useState(false);
@@ -123,7 +124,12 @@ function App() {
                         </TabsContent>
 
                         <TabsContent value="rescaling" className="h-full m-0 data-[state=active]:block">
-                            <RescalingSection />
+                            <RescalingSection
+                                selectedFiles={rescalingFiles}
+                                setSelectedFiles={setRescalingFiles}
+                                logs={logs}
+                                setLogs={setLogs}
+                            />
                         </TabsContent>
                     </div>
                 </Tabs>

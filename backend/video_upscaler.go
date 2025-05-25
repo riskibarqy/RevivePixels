@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"encoding/base64"
 	"fmt"
 	"math"
 	"os"
@@ -32,6 +33,7 @@ type VideoUpscalerUsecase interface {
 	ReassembleVideo(ctx context.Context, frameDir, outputPath string, params *datatransfers.VideoUpscalerRequest) error
 	UpscaleFrames(ctx context.Context, frames []string, frameDir string, params *datatransfers.VideoUpscalerRequest) error
 	UpscaleVideoWithRealESRGAN(ctx context.Context, params *datatransfers.VideoUpscalerRequest) error
+	GetVideoInfo(ctx context.Context, fileData string) (*datatransfers.VideoInfoResponse, error)
 }
 
 type videoUpscalerUsecase struct {
@@ -422,4 +424,110 @@ func (u *videoUpscalerUsecase) UpscaleVideoWithRealESRGAN(ctx context.Context, p
 	u.logger.Info(fmt.Sprintf("✅ Upscaling completed! Took: %dm%.2fs! 📊 Frames: %d | FPS: %d | Model: %s | Scale: %dx | video height: %d | video width: %d", int(totalElapsed/60), totalElapsed, videoMetaData.FPS, videoMetaData.TotalFrames, params.Model, params.ScaleMultiplier, videoMetaData.Height, videoMetaData.Width))
 
 	return nil
+}
+
+func (u *videoUpscalerUsecase) GetVideoInfo(ctx context.Context, fileData string) (*datatransfers.VideoInfoResponse, error) {
+	u.logger.Info("Getting video info from uploaded file")
+
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "video-info-*.mp4")
+	if err != nil {
+		u.logger.Error(fmt.Sprintf("Failed to create temp file: %v", err))
+		return nil, fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name()) // Clean up temp file when done
+
+	// Decode base64 data
+	data, err := base64.StdEncoding.DecodeString(fileData)
+	if err != nil {
+		u.logger.Error(fmt.Sprintf("Failed to decode base64 data: %v", err))
+		return nil, fmt.Errorf("failed to decode base64 data: %v", err)
+	}
+
+	// Write to temp file
+	if _, err := tempFile.Write(data); err != nil {
+		u.logger.Error(fmt.Sprintf("Failed to write temp file: %v", err))
+		return nil, fmt.Errorf("failed to write temp file: %v", err)
+	}
+	tempFile.Close()
+	
+	cmd := exec.CommandContext(ctx, config.Paths.FFprobePath,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height,codec_name,r_frame_rate,duration,nb_frames",
+		"-show_entries", "format=duration,bit_rate,format_name",
+		"-of", "json",
+		tempFile.Name(),
+	)
+	utils.HideWindowsCMD(cmd)
+
+	output, err := cmd.Output()
+	if err != nil {
+		u.logger.Error(fmt.Sprintf("Failed to get video info: %v", err))
+		return nil, fmt.Errorf("failed to get video info: %v", err)
+	}
+
+	var probe struct {
+		Streams []struct {
+			Width       int    `json:"width"`
+			Height      int    `json:"height"`
+			CodecName   string `json:"codec_name"`
+			RFrameRate  string `json:"r_frame_rate"`
+			Duration    string `json:"duration"`
+			NbFrames    string `json:"nb_frames"`
+		} `json:"streams"`
+		Format struct {
+			Duration   string `json:"duration"`
+			BitRate    string `json:"bit_rate"`
+			FormatName string `json:"format_name"`
+		} `json:"format"`
+	}
+
+	if err := json.Unmarshal(output, &probe); err != nil {
+		u.logger.Error(fmt.Sprintf("Failed to parse video info: %v", err))
+		return nil, fmt.Errorf("failed to parse video info: %v", err)
+	}
+
+	if len(probe.Streams) == 0 {
+		u.logger.Error("No video streams found")
+		return nil, fmt.Errorf("no video streams found")
+	}
+
+	stream := probe.Streams[0]
+	
+	// Parse frame rate (e.g., "30000/1001" -> 29.97)
+	frameRateParts := strings.Split(stream.RFrameRate, "/")
+	numerator, _ := strconv.ParseFloat(frameRateParts[0], 64)
+	denominator, _ := strconv.ParseFloat(frameRateParts[1], 64)
+	frameRate := numerator / denominator
+
+	// Parse duration
+	duration, _ := strconv.ParseFloat(probe.Format.Duration, 64)
+
+	// Parse bitrate
+	bitrate, _ := strconv.Atoi(probe.Format.BitRate)
+	bitrate = bitrate / 1000 // Convert to kbps
+
+	// Parse total frames
+	totalFrames, _ := strconv.Atoi(stream.NbFrames)
+	if totalFrames == 0 && duration > 0 {
+		// If nb_frames is not available, estimate from duration and frame rate
+		totalFrames = int(duration * frameRate)
+	}
+
+	response := &datatransfers.VideoInfoResponse{
+		Width:       stream.Width,
+		Height:      stream.Height,
+		Bitrate:     bitrate,
+		Codec:       stream.CodecName,
+		Format:      strings.Split(probe.Format.FormatName, ",")[0], // Take first format if multiple
+		FrameRate:   frameRate,
+		Duration:    duration,
+		TotalFrames: totalFrames,
+	}
+
+	u.logger.Info(fmt.Sprintf("Video info: %dx%d, %s, %s, %.2f fps, %d kbps", 
+		response.Width, response.Height, response.Codec, response.Format, response.FrameRate, response.Bitrate))
+
+	return response, nil
 }

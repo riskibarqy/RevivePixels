@@ -18,6 +18,10 @@ export function ExtractRealEsrgan() {
   return window['go']['main']['App']['ExtractRealEsrgan']();
 }
 
+export function GetVideoInfo(arg1) {
+  return window['go']['main']['App']['GetVideoInfo'](arg1);
+}
+
 export function OpenOutputFolder() {
   return window['go']['main']['App']['OpenOutputFolder']();
 }
