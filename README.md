@@ -3,6 +3,8 @@
 
 **RevivePixels** is a Windows-only video upscaling application built with **Wails**, **Golang**, and **React** (using **TailwindCSS**). It utilizes **Real-ESRGAN NCNN Vulkan** for AI-based upscaling and **FFmpeg** for video processing, both of which are embedded within the application.
 
+![apps-view](https://github.com/riskibarqy/RevivePixels/blob/main/assets/apps-view.png)
+
 ## Features
 
 - **Lightweight** – Only ~300MB in size
@@ -22,21 +24,24 @@
 
 ## Benchmarking
 I use RTX 3060 (12GB), 32GB RAM, AMD Ryzen 5 3600, with video length 5 seconds, using different model 
-+-------------------------+-------+----------------+------------+
-| Model                   | Scale | FrameTotal/FPS | Time Taken |
-+-------------------------+-------+----------------+------------+
-| realesr-animevideov3    | 2x    | 157/29         | 1m81.66s   |
-+-------------------------+-------+----------------+------------+
-| realesr-animevideov3    | 3x    | 157/29         | 1m81.15s   |
-+-------------------------+-------+----------------+------------+
-| realesr-animevideov3    | 4x    | 157/29         | 1m80.40s   |
-+-------------------------+-------+----------------+------------+
-| realesrgan-x4plus       | 4x    | 157/29         | 3m203.70s  |
-+-------------------------+-------+----------------+------------+
-| realesrnet-x4plus       | 4x    | 157/29         | 3m213.48s  |
-+-------------------------+-------+----------------+------------+
-| realesrgan-x4plus-anime | 4x    | 157/29         | 1m108.42s  |
-+-------------------------+-------+----------------+------------+
+
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/benchmark-image-capt-tsubasa.png)
+
+Image Comparison
+Original Image
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/original-image.png)
+realesr-animevideov3-x2
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesr-animevideov3-x2.png)
+realesr-animevideov3-x3
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesr-animevideov3-x3.png)
+realesr-animevideov3-x4
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesr-animevideov3-x4.png)
+realesrgan-x4plus
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesrgan-x4plus.png)
+realesrnet-x4plus
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesrnet-x4plus.png)
+realesrgan-x4plus-anime
+![Benchmark-capt-tsubasa](https://github.com/riskibarqy/RevivePixels/blob/main/assets/realesrgan-x4plus-anime.png)
 
 ## Installation & Usage
 
@@ -76,8 +81,13 @@ Before running the project locally, ensure you have installed:
 This project is made possible by the following open-source technologies:
 
 [Real-ESRGAN NCNN Vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) – AI-powered video upscaling
+
 [FFmpeg](https://www.ffmpeg.org/) – Video processing
+
 [Wails](https://wails.io/) – Golang desktop application framework
+
 [React](https://react.dev/) – Frontend UI
+
 [TailwindCSS](https://tailwindcss.com/) – Styling framework
+
 [Golang](https://go.dev/) – Backend logic
